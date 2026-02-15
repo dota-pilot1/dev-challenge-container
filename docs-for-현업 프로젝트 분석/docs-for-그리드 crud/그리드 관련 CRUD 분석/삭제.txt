@@ -1,0 +1,39 @@
+# 브랜드 정보 삭제 (Delete) 로직 분석
+
+## 1. 현황 분석
+현재 제공된 `BrandMng` 관련 소스 코드(`Service`, `Mapper`) 상에는 **삭제(Delete) 기능이 구현되어 있지 않습니다.**
+
+### 1.1 백엔드 코드 확인 결과
+- `BrandMngService.java`: `saveBrandList` 메서드에서 `status`가 "C"(Insert)와 "U"(Update)인 경우만 처리하고 있습니다. "D"(Delete)에 대한 분기 처리가 없습니다.
+- `BrandMngMapper.xml`: `<delete>` 태그나 삭제 기능을 수행하는 쿼리가 존재하지 않습니다.
+
+## 2. 구현 가이드 (Standard Practice)
+일반적인 그리드 CRUD에서 삭제 기능을 구현하려면 다음과 같은 로직이 추가되어야 합니다.
+
+### 2.1 프론트엔드
+1. **행 삭제 동작**: 그리드에서 행 선택 후 "삭제" 버튼 클릭 시, 해당 행을 시각적으로 숨기거나 취소선 처리.
+2. **상태값 설정**: 해당 데이터의 `status`를 "D"로 설정하여 API 요청 리스트에 포함.
+
+### 2.2 백엔드 (구현 필요 사항)
+1. **Service (`BrandMngService.java`)**:
+   ```java
+   else if ("D".equals(status)) {
+       brandMngMapper.deleteBrand(brand);
+   }
+   ```
+2. **Mapper (`BrandMngMapper.xml`)**:
+   - **물리 삭제 (Hard Delete)**:
+     ```xml
+     <delete id="deleteBrand">
+         DELETE FROM FSCPS.TEST_BRAND_M
+         WHERE CO_ID = #{coId} AND BRAND_ID = #{brandId}
+     </delete>
+     ```
+   - **논리 삭제 (Soft Delete)**: `UPDATE`를 사용하여 `USE_YN`을 'N'으로 변경 하거나 삭제 일시를 업데이트.
+     ```xml
+     <update id="deleteBrand">
+         UPDATE FSCPS.TEST_BRAND_M
+         SET USE_YN = 'N', UPDT_DTTM = now()
+         WHERE CO_ID = #{coId} AND BRAND_ID = #{brandId}
+     </update>
+     ```

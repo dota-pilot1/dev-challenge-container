@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.opro.concurrency.mapper.ApprovalHistoryMapper">
+
+    <insert id="insert" parameterType="com.opro.concurrency.entity.ApprovalHistory"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO approval_history (participation_id, action, status, order_id, error_message, created_at)
+        VALUES (#{participationId}, #{action}, #{status}, #{orderId}, #{errorMessage}, NOW())
+    </insert>
+
+    <select id="findAll" resultType="com.opro.concurrency.entity.ApprovalHistory">
+        SELECT id, participation_id, action, status, order_id, error_message, created_at
+        FROM approval_history
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="findByParticipationId" resultType="com.opro.concurrency.entity.ApprovalHistory">
+        SELECT id, participation_id, action, status, order_id, error_message, created_at
+        FROM approval_history
+        WHERE participation_id = #{participationId}
+        ORDER BY created_at DESC
+    </select>
+
+</mapper>

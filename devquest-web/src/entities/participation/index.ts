@@ -1,2 +1,7 @@
-export { participationsApi } from './api/participation-api'
-export type { Participation, CreateParticipationRequest, SubmitRequest } from './model'
+export { participationsApi } from "./api/participation-api";
+export type {
+  Participation,
+  CreateParticipationRequest,
+  SubmitRequest,
+  ApprovalHistory,
+} from "./model";

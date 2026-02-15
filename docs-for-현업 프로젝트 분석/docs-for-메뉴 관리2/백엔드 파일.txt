@@ -1,0 +1,268 @@
+# 관련 백엔드 파일 소스 모음
+
+본 문서는 메뉴 관리 및 데이터 조회 로직과 관련된 핵심 백엔드 파일들의 실제 소스 코드를 포함하고 있습니다.
+
+## 1. UserInfoFscpsController.java
+`src/main/java/com/cj/freshway/fs/cps/common/userInfo/UserInfoFscpsController.java`
+
+```java
+package com.cj.freshway.fs.cps.common.userInfo;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import com.cj.freshway.fs.common.base.GridResponse;
+import com.cj.freshway.fs.cps.common.base.FscpsBaseController;
+import com.cj.freshway.fs.cps.common.userInfo.dto.AuthDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.MenuDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.ShopSearchDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.UserInfoDto;
+import com.cj.freshway.fs.cps.common.userInfo.entity.NotificationHist;
+import com.cj.freshway.fs.cps.common.userInfo.exception.UserInfoFscpsException;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * <pre>
+ * 사용자 정보(메뉴, 권한, 정보) 컨트롤러
+ * </pre>
+ *
+ * @author MunYoungJun <yj.moon82@kt.com>
+ */
+@Slf4j
+@RestController
+@RequestMapping("api/userInfo")
+@Tag(name = "userInfo", description = "userInfo API")
+public class UserInfoFscpsController extends FscpsBaseController {
+
+  @Autowired
+  UserInfoFscpsService userInfoService;
+
+  /**
+   * <pre>
+   * 사용자 정보 조회(사용자 정보, 메뉴 조회 ,권한 조회)
+   * </pre>
+   *
+   * @param HttpServletRequest req
+   * @return Map<String, Object>
+   * @throws UserInfoFscpsException UserInfoException
+   * @author MunYoungJun <yj.moon82@kt.com>
+   */
+  @PostMapping("v1.0")
+  public Map<String, Object> userInfo(HttpServletRequest req) throws UserInfoFscpsException {
+
+
+    Map<String, Object> returnMap = new HashMap<String, Object>();
+
+    // 토큰 정보 추출
+    String userId = userInfoService.tokenUserId(req);
+
+    log.info("authentication 검증 추출: {}", userId);
+
+
+    // 사용자 정보 세팅
+    UserInfoDto userInfo = userInfoService.selectUserInfo(userId);
+
+    // 메뉴 정보 세팅
+    List<MenuDto> menuList = userInfoService.selectMenuList(userId);
+
+    returnMap.put("menuList", menuList);
+
+    // 프로그램 권한 조회
+    List<AuthDto> progAuthList = userInfoService.selectAuthList(userId);
+
+    returnMap.put("progAuthList", progAuthList);
+
+    // 점포 조회
+    userInfo.setShopList(userInfoService.selectShopList(userId));
+    // 점포 조회
+    userInfo.setSiteList(userInfoService.selectSiteList(userId));
+
+    returnMap.put("userInfo", userInfo);
+
+    return returnMap;
+  }
+
+  // ... (Other methods omitted for brevity as they are not core to Menu Logic)
+}
+```
+
+## 2. UserInfoFscpsService.java
+`src/main/java/com/cj/freshway/fs/cps/common/userInfo/UserInfoFscpsService.java`
+
+```java
+package com.cj.freshway.fs.cps.common.userInfo;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import com.cj.freshway.fs.common.base.GridResponse;
+import com.cj.freshway.fs.common.jwt.JwtProvider;
+import com.cj.freshway.fs.cps.common.userInfo.dto.AuthDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.MenuDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.ShopDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.ShopSearchDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.SiteDto;
+import com.cj.freshway.fs.cps.common.userInfo.dto.UserInfoDto;
+import com.cj.freshway.fs.cps.common.userInfo.entity.NotificationHist;
+import com.cj.freshway.fs.cps.common.userInfo.exception.UserInfoFscpsException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * <pre>
+ * 사용자 정보(메뉴, 권한, 정보) 서비스
+ * </pre>
+ *
+ * @author MunYoungJun <yj.moon82@kt.com>
+ */
+@Slf4j
+@RequiredArgsConstructor
+@Service
+@Transactional(readOnly = true)
+public class UserInfoFscpsService {
+
+  public static final String AUTHORIZATION_HEADER = "Authorization";
+  public static final String BEARER_PREFIX = "Bearer ";
+
+  @Autowired
+  UserInfoFscpsMapper userInfoMapper;
+
+  @Autowired
+  JwtProvider jwtProvider;
+
+  /**
+   * <pre>
+   * 메뉴 조회
+   * </pre>
+   *
+   * @param userId
+   * @return List<MenuDto>
+   * @throws UserInfoFscpsException UserInfoException
+   * @author MunYoungJun <yj.moon82@kt.com>
+   */
+  // @Cacheable(value = "selectMenuList", key = "#userId")
+  public List<MenuDto> selectMenuList(String userId) throws UserInfoFscpsException {
+    Map<String, Object> param = new HashMap<String, Object>();
+    param.put("userId", userId);
+    param.put("progLvl", 3);
+    List<MenuDto> menuList = userInfoMapper.selectMenuList(param);
+    for (MenuDto dto : menuList) {
+      param = new HashMap<String, Object>();
+      param.put("userId", userId);
+      param.put("progLvl", 4);
+      param.put("upProgNo", dto.getNo());
+      List<MenuDto> menuSubList = userInfoMapper.selectMenuList(param);
+      dto.setSubMenus(null);
+      if (menuSubList.size() > 0) {
+        dto.setSubMenus(menuSubList);
+      }
+      for (MenuDto sub : menuSubList) {
+        param = new HashMap<String, Object>();
+        param.put("userId", userId);
+        param.put("progLvl", 5);
+        param.put("upProgNo", sub.getNo());
+        List<MenuDto> menuThirdList = userInfoMapper.selectMenuList(param);
+        sub.setSubMenus(null);
+        if (menuThirdList.size() > 0) {
+          sub.setSubMenus(menuThirdList);
+        }
+      }
+
+    }
+    return menuList;
+  }
+
+  // ... (Other methods omitted)
+}
+```
+
+## 3. UserInfoFscpsMapper.xml
+`src/main/resources/mappers/cps/common/userInfo/UserInfoFscpsMapper.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cj.freshway.fs.cps.common.userInfo.UserInfoFscpsMapper">
+	
+	<resultMap id="ResultMap" type="com.cj.freshway.fs.cps.common.userInfo.dto.MenuDto">
+		<result column="prog_no" property="no" jdbcType="VARCHAR" />
+		<result column="prog_cd" property="id" jdbcType="VARCHAR" />
+		<result column="prog_nm" property="menuName" jdbcType="VARCHAR" />
+		<result column="prog_lvl" property="depth" jdbcType="INTEGER" />
+		<result column="prog_url" property="componentName" jdbcType="VARCHAR" />
+		<result column="prog_url_args" property="component" jdbcType="VARCHAR" />
+	</resultMap>
+	<select id="selectMenuList" parameterType="java.lang.String" resultMap="ResultMap">
+		select /* com.cj.freshway.fs.cps.common.fscpsuserInfo.FscpsUserInfoMapper.selectMenuList */ *
+		  from (
+			select
+				a.prog_cd as prog_cd,
+				case
+					when b.prog_nm is null then a.prog_nm
+					else b.prog_nm
+				end as prog_nm,
+				substring(a.prog_no::varchar, 1, length(a.prog_no)-2) as up_prog_no,
+				a.prog_no as prog_no,
+	       		#{progLvl} - 3 as prog_lvl,
+	       		a.prog_url as prog_url,
+	       		a.prog_url_args as prog_url_args
+			from fscps.cm_program_m a
+			left outer join fscps.cm_program_language_m b
+			  on a.prog_cd = b.prog_cd and b.lang_cl = 'ko'
+			where 1 = 1
+			and a.use_yn = 'Y'
+			and a.menu_yn = 'Y'
+			and a.system_cl = 'FSBO'
+		<!--and a.prog_no ILIKE '0712%'-->
+			and a.prog_lvl = #{progLvl}
+		order by a.prog_no) tb
+		where 1 = 1
+		<if test="upProgNo != null and upProgNo != ''">
+		and tb.up_prog_no = #{upProgNo}
+	    </if>
+	</select>
+</mapper>
+```
+
+## 4. MenuDto.java
+`src/main/java/com/cj/freshway/fs/cps/common/userInfo/dto/MenuDto.java`
+
+```java
+package com.cj.freshway.fs.cps.common.userInfo.dto;
+
+import java.io.Serializable;
+import java.util.List;
+import lombok.Data;
+import lombok.ToString;
+
+@Data
+@ToString(callSuper = true)
+public class MenuDto implements Serializable {
+
+  private static final long serialVersionUID = 7111086575907023057L;
+
+  private String id;
+  private String menuName;
+  private int depth;
+  boolean active;
+  private String no;
+  private String componentName;
+  private String component;
+  private List<MenuDto> subMenus;
+
+}
+```

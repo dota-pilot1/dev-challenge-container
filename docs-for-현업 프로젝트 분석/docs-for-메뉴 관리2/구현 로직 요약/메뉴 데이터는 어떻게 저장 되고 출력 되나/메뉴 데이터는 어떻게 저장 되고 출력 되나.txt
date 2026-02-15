@@ -1,0 +1,65 @@
+# 메뉴 데이터 저장 및 출력 방색 (백엔드 & DB)
+
+## 1. 데이터베이스 구조 (저장 방식)
+
+메뉴 데이터는 주로 다음 3개의 테이블에 저장되어 관리됩니다.
+
+### 1) fscps.cm_program_m (프로그램 마스터)
+- **prog_cd**: 메뉴/프로그램 식별자 (ID)
+- **prog_nm**: 기본 메뉴명
+- **prog_lvl**: 메뉴의 깊이/레벨
+    - **3**: 대메뉴 (Header, Depth 0)
+    - **4**: 중메뉴 (Left Menu Group, Depth 1)
+    - **5**: 소메뉴 (Left Menu Item, Depth 2)
+- **prog_no**: 정렬 및 계층 구조를 위한 번호 (예: `070101`)
+    - 상위 메뉴는 하위 메뉴 번호의 앞자리를 공유함 (예: `0701`의 부모는 `07`).
+- **prog_url / prog_url_args**: 프론트엔드 라우팅 및 컴포넌트 매핑 정보 (ComponentName / Path).
+- **use_yn, menu_yn**: 사용 여부 및 메뉴 표시 여부 Flag.
+
+### 2) fscps.cm_program_language_m (다국어)
+- 언어별(ko, en 등) 메뉴명을 저장.
+- 조회 시 `lang_cl='ko'` 등의 조건으로 조인하여 현지화된 이름을 우선 사용.
+
+### 3) fscps.cm_auth_program_m (권한)
+- 권한별로 접근 가능한 프로그램 매핑.
+- 조회 시 사용자의 권한(`auth_cd`)과 매핑된 메뉴만 필터링됨.
+
+## 2. 백엔드 조회 및 출력 로직
+
+### API 흐름
+`Client` -> `UserInfoFscpsController` -> `UserInfoFscpsService` -> `UserInfoFscpsMapper` -> `DB`
+
+### 재귀적 데이터 조회 (UserInfoFscpsService.java)
+서비스 로직(`selectMenuList`)은 3단계에 걸쳐 데이터를 조립합니다.
+
+1. **Step 1 (Lvl 3)**: `progLvl=3`인 최상위 메뉴 목록을 조회합니다.
+2. **Step 2 (Lvl 4)**: 각 상위 메뉴에 대해 `progLvl=4`이면서 `up_prog_no`가 상위 메뉴와 일치하는 자식 메뉴들을 조회하여 `subMenus` 리스트에 담습니다.
+3. **Step 3 (Lvl 5)**: 각 중간 메뉴에 대해 `progLvl=5`이면서 `up_prog_no`가 일치하는 손자 메뉴들을 조회하여 `subMenus` 리스트에 담습니다.
+
+### 결과 데이터 구조 (DTO)
+최종적으로 프론트엔드에 전달되는 JSON 구조는 다음과 같습니다.
+```json
+[
+  {
+    "id": "TOP_MENU_1",
+    "menuName": "대메뉴",
+    "depth": 0,
+    "subMenus": [
+      {
+        "id": "SUB_MENU_1",
+        "menuName": "중메뉴",
+        "depth": 1,
+        "subMenus": [
+          {
+            "id": "LEAF_MENU_1",
+            "menuName": "소메뉴",
+            "depth": 2,
+            "componentName": "...",
+            "component": "..."
+          }
+        ]
+      }
+    ]
+  }
+]
+```

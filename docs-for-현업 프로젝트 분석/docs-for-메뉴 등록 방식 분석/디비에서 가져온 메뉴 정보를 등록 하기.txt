@@ -1,0 +1,49 @@
+메뉴 출력 하는 방식의 요약 정리
+
+1. App.jsx 에서 메뉴 정보 가져 와서 스토어에 등록
+- localStorage의 'sessionMenuList'에서 메뉴 트리 데이터를 가져옴.
+- `createMenuComponent` 함수를 통해 DB의 경로 문자열(`component`)을 실제 React 컴포넌트(`comp`)로 재귀적으로 매핑(import).
+- 매핑된 전체 메뉴 리스트를 Recoil 스토어(`fwMenuState`)에 저장.
+
+```javascript
+  const createMenuComponent = (menu) => {
+    // 문자열 경로를 실제 컴포넌트로 변환하여 comp 속성에 할당
+    menu.comp = retryLazy(() => import(`./${menu.component}.jsx`))
+    if (menu.subMenus != null) {
+      for (let i = 0; i < menu.subMenus.length; i++) {
+        createMenuComponent(menu.subMenus[i]) // 재귀 호출로 모든 단계 처리
+      }
+    }
+  }
+
+  useEffect(() => {
+    const list = localStorage.getItem('sessionMenuList')
+    let getMenuList = JSON.parse(list)
+    for (let i = 0; i < getMenuList?.length; i++) {
+      createMenuComponent(getMenuList[i])
+    }
+    setFwMenu(getMenuList) // Recoil 스토어에 등록
+  })
+```
+
+2. 스토어에 등록되는 형식
+- `fwMenuState` (Recoil Atom)에 **트리 구조**로 저장됨.
+- 각 메뉴 객체는 `menuName`, `component`(경로 문자열), `comp`(실제 컴포넌트), `subMenus`(자식 메뉴 배열) 등을 포함함.
+
+3. 탭 정보 및 본문 출력 위치
+- **탭 정보 저장**: `src/store/atoms/layout/tabs-atom.js`의 `tabStore` (Recoil Atom)
+  - 사용자가 메뉴를 클릭하면 `useFwTab` 훅의 `handleAddTab`에 의해 현재 열린 탭 리스트가 관리됨.
+- **탭 본문 출력**: `src/components/common/layout/ContentsPage.jsx`
+  - `tabs.map()`을 돌며 `tab.comp`를 찾아 `<tab.comp />` 형태로 화면 본문에 직접 렌더링함.
+
+4. ContentsPage.jsx의 역할: 전체 레이아웃 제어
+헤더(Header): 상단 영역
+탭 바(MdiTab): 열려있는 탭 버튼들
+레프트 메뉴(
+LeftMenu
+): 좌측 사이드바
+탭 본문(Contents Area): 실제 업무 화면들 (tabs.map으로 렌더링)
+모든 데이터흐름(어떤 메뉴가 열렸는지, 어떤 탭이 활성화되었는지 등)이 Recoil을 통해 이 
+ContentsPage
+ 주변으로 집결되어 화면이 구성되는 구조
+```

@@ -3,6 +3,7 @@ export interface Challenge {
   title: string;
   description: string | null;
   rewardProductId: number;
+  rewardQuantity: number;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -12,4 +13,5 @@ export interface CreateChallengeRequest {
   title: string;
   description?: string;
   rewardProductId: number;
+  rewardQuantity: number;
 }

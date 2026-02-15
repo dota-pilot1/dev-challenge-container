@@ -5,6 +5,7 @@ import { DRIZZLE } from '../database/drizzle.provider';
 import * as schema from '../database/schema';
 import { products } from '../database/schema';
 import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateStockDto } from './dto/update-stock.dto';
 
 @Injectable()
 export class ProductService {
@@ -29,6 +30,16 @@ export class ProductService {
 
   async findAll() {
     return this.db.select().from(products);
+  }
+
+  async updateStock(id: number, dto: UpdateStockDto) {
+    await this.findById(id);
+    const [updated] = await this.db
+      .update(products)
+      .set({ stock: dto.stock, updatedAt: new Date() })
+      .where(eq(products.id, id))
+      .returning();
+    return updated;
   }
 
   async findById(id: number) {

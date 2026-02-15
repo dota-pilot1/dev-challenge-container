@@ -4,7 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, sql, and, gte } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { DRIZZLE } from '../database/drizzle.provider';
 import * as schema from '../database/schema';
@@ -35,17 +35,32 @@ export class OrderService {
       );
     }
 
-    if (product.stock < quantity) {
+    // 원본 코드:
+    // // 원래 코드
+    // if (product.stock < quantity) {
+    //   throw new BadRequestException('재고가 부족합니다');
+    // }
+
+    // await this.db
+    //   .update(products)
+    //   .set({ stock: product.stock - quantity, updatedAt: new Date() })
+    //   .where(eq(products.id, dto.productId));
+
+    // 원자적 재고 차감: stock >= quantity 인 경우에만 차감
+    const [updated] = await this.db
+      .update(products)
+      .set({
+        stock: sql`${products.stock} - ${quantity}`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(products.id, dto.productId), gte(products.stock, quantity)))
+      .returning();
+
+    if (!updated) {
       throw new BadRequestException(
-        `재고가 부족합니다 (현재: ${product.stock})`,
+        `재고가 부족합니다 (현재: ${product.stock}개 / 주문: ${quantity}개 / 부족: ${quantity - product.stock}개)`,
       );
     }
-
-    // 재고 차감 (동시성 제어 없음 - 2단계에서 해결)
-    await this.db
-      .update(products)
-      .set({ stock: product.stock - quantity, updatedAt: new Date() })
-      .where(eq(products.id, dto.productId));
 
     // 주문 생성
     const [order] = await this.db

@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper">
+	
+	<resultMap id="IcnAirportShopResultMap" type="com.cj.freshway.fs.cps.base.icnairportmng.entity.IcnAirportShopMngEntity">
+		<result column="RN" property="rn" jdbcType="INTEGER" />
+		<result column="CO_ID" property="coId" jdbcType="VARCHAR" />
+		<result column="SHOP_ID" property="shopId" jdbcType="VARCHAR" />
+		<result column="STE_ID" property="steId" jdbcType="VARCHAR" />
+		<result column="CRNR_ID" property="crnrId" jdbcType="VARCHAR" />
+		<result column="CRNR_NM" property="crnrNm" jdbcType="VARCHAR" />
+		<result column="SORT_SER_NO" property="sortSerNo" jdbcType="INTEGER" />
+		<result column="BRAND_ID" property="brandId" jdbcType="VARCHAR" />
+		<result column="SALES_UNIT_CODE" property="salesUnitCode" jdbcType="VARCHAR" />
+		<result column="STORE_ID" property="storeId" jdbcType="VARCHAR" />
+		<result column="STORE_TYPE" property="storeType" jdbcType="VARCHAR" />
+		<result column="TELEPHONE" property="telephone" jdbcType="VARCHAR" />
+		<result column="STORE_NAMES" property="storeNamesJson" jdbcType="VARCHAR" />
+		<result column="STORE_NOTICES" property="storeNoticesJson" jdbcType="VARCHAR" />
+		<result column="USE_YN" property="useYn" jdbcType="VARCHAR" />
+		<result column="REGR_ID" property="regrId" jdbcType="VARCHAR" />
+		<result column="UPDT_ID" property="updtId" jdbcType="VARCHAR" />
+	</resultMap>
+
+	<!-- 인천공항 매장 목록 조회 -->
+	<select id="selectIcnAirportShopLst" parameterType="com.cj.freshway.fs.cps.base.icnairportmng.dto.IcnAirportShopMngDto" resultMap="IcnAirportShopResultMap">
+		/* com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper.selectIcnAirportShopLst[인천공항 매장 목록 조회] */
+		SELECT 
+			ROW_NUMBER() OVER (ORDER BY SORT_SER_NO, SHOP_ID) AS RN
+			, CO_ID
+			, SHOP_ID
+			, STE_ID
+			, CRNR_ID
+			, CRNR_NM
+			, SORT_SER_NO
+			, USE_YN
+		FROM FSCPS.BS_ICN_AIRPORT_SHOP_M
+		WHERE 1=1
+		<if test="coId != null and coId != ''">
+			AND CO_ID = #{coId}
+		</if>
+		<if test="steId != null and steId != ''">
+			AND STE_ID = #{steId}
+		</if>
+		ORDER BY SORT_SER_NO, SHOP_ID
+	</select>
+
+	<!-- 인천공항 매장 상세 조회 -->
+	<select id="selectIcnAirportShopDtl" parameterType="com.cj.freshway.fs.cps.base.icnairportmng.dto.IcnAirportShopMngDto" resultMap="IcnAirportShopResultMap">
+		/* com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper.selectIcnAirportShopDtl[인천공항 매장 상세 조회] */
+		SELECT 
+			CO_ID
+			, SHOP_ID
+			, STE_ID
+			, CRNR_ID
+			, BRAND_ID
+			, SALES_UNIT_CODE
+			, STORE_ID
+			, STORE_TYPE
+			, TELEPHONE
+			, STORE_NAMES
+			, STORE_NOTICES
+			, USE_YN
+			, REGR_ID
+			, UPDT_ID
+		FROM FSCPS.BS_ICN_AIRPORT_SHOP_M
+		WHERE 1=1
+		<if test="coId != null and coId != ''">
+			AND CO_ID = #{coId}
+		</if>
+		<if test="steId != null and steId != ''">
+			AND STE_ID = #{steId}
+		</if>
+		<if test="shopId != null and shopId != ''">
+			AND SHOP_ID = #{shopId}
+		</if>
+		<if test="crnrId != null and crnrId != ''">
+			AND CRNR_ID = #{crnrId}
+		</if>
+		LIMIT 1
+	</select>
+
+	<!-- 인천공항 매장 존재 여부 확인 -->
+	<select id="checkIcnAirportShopExists" parameterType="com.cj.freshway.fs.cps.base.icnairportmng.dto.IcnAirportShopMngDto" resultType="int">
+		/* com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper.checkIcnAirportShopExists[인천공항 매장 존재 여부 확인] */
+		SELECT COUNT(1)
+		FROM FSCPS.BS_ICN_AIRPORT_SHOP_M
+		WHERE 1=1
+		<if test="coId != null and coId != ''">
+			AND CO_ID = #{coId}
+		</if>
+		<if test="steId != null and steId != ''">
+			AND STE_ID = #{steId}
+		</if>
+		<if test="shopId != null and shopId != ''">
+			AND SHOP_ID = #{shopId}
+		</if>
+		<if test="crnrId != null and crnrId != ''">
+			AND CRNR_ID = #{crnrId}
+		</if>
+		<if test="storeId != null and storeId != ''">
+			AND STORE_ID = #{storeId}
+		</if>
+		<if test="crnrId != null and crnrId != ''">
+			AND CRNR_ID = #{crnrId}
+		</if>
+	</select>
+
+	<!-- 인천공항 매장 신규 등록 -->
+	<insert id="insertIcnAirportShop" parameterType="com.cj.freshway.fs.cps.base.icnairportmng.entity.IcnAirportShopMngEntity">
+		/* com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper.insertIcnAirportShop[인천공항 매장 신규 등록] */
+		INSERT INTO FSCPS.BS_ICN_AIRPORT_SHOP_M (
+			CO_ID
+			, SHOP_ID
+			, STE_ID
+			, CRNR_ID
+			, BRAND_ID
+			, SALES_UNIT_CODE
+			, STORE_ID
+			, STORE_TYPE
+			, TELEPHONE
+			, STORE_NAMES
+			, STORE_NOTICES
+			, USE_YN
+			, REG_DTTM
+			, REGR_ID
+			, UPDT_DTTM
+			, UPDT_ID
+		) VALUES (
+			#{coId}
+			, #{shopId}
+			, #{steId}
+			, #{crnrId}
+			, #{brandId}
+			, #{salesUnitCode}
+			, #{storeId}
+			, #{storeType}
+			, #{telephone}
+			, #{storeNamesJson, jdbcType=VARCHAR}
+			, #{storeNoticesJson, jdbcType=VARCHAR}
+			, #{useYn}
+			, NOW()
+			, #{regrId}
+			, NOW()
+			, #{updtId}
+		)
+	</insert>
+
+	<!-- 인천공항 매장 수정 -->
+	<update id="updateIcnAirportShop" parameterType="com.cj.freshway.fs.cps.base.icnairportmng.entity.IcnAirportShopMngEntity">
+		/* com.cj.freshway.fs.cps.base.icnairportmng.IcnAirportShopMngMapper.updateIcnAirportShop[인천공항 매장 수정] */
+		UPDATE FSCPS.BS_ICN_AIRPORT_SHOP_M
+		SET 
+			BRAND_ID = #{brandId}
+			, SALES_UNIT_CODE = #{salesUnitCode}
+			, STORE_TYPE = #{storeType}
+			, TELEPHONE = #{telephone}
+			, STORE_NAMES = #{storeNamesJson, jdbcType=VARCHAR}
+			, STORE_NOTICES = #{storeNoticesJson, jdbcType=VARCHAR}
+			, USE_YN = #{useYn}
+			, UPDT_DTTM = NOW()
+			, UPDT_ID = #{updtId}
+		WHERE 1=1
+			AND CO_ID = #{coId}
+			AND STE_ID = #{steId}
+			AND SHOP_ID = #{shopId}
+			AND STORE_ID = #{storeId}
+	</update>
+
+</mapper>
+

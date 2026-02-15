@@ -1,0 +1,186 @@
+================================================================================
+  승인 이력 테이블 + 로직 수정 절차
+================================================================================
+
+
+[순서 요약]
+
+  1. DB: approval_history 테이블 생성
+  2. 백엔드: 엔티티 → 매퍼 → 서비스 수정 → 재시도 API 추가
+  3. 프론트: 뱃지 + 재시도 버튼
+
+
+================================================================================
+[STEP 1] DB - 테이블 생성
+================================================================================
+
+  파일: concurrency-lab/src/main/resources/schema.sql (또는 직접 실행)
+
+  CREATE TABLE approval_history (
+      id                BIGSERIAL PRIMARY KEY,
+      participation_id  BIGINT NOT NULL,
+      action            VARCHAR(30) NOT NULL,
+      status            VARCHAR(20) NOT NULL,
+      order_id          INTEGER,
+      error_message     TEXT,
+      created_at        TIMESTAMP NOT NULL DEFAULT NOW()
+  );
+
+
+==============================================================================
+[STEP 2] 엔티티 생성
+==============================================================================
+
+  파일: ApprovalHistory.java (새로 생성)
+  경로: concurrency-lab/src/main/java/com/opro/concurrency/entity/
+
+  필드:
+    - id (Long)
+    - participationId (Long)
+    - action (String)       // APPROVE_REQUEST, APPROVE_RETRY, APPROVE_CANCEL
+    - status (String)       // SUCCESS, FAILED
+    - orderId (Integer)
+    - errorMessage (String)
+    - createdAt (LocalDateTime)
+
+
+==============================================================================
+[STEP 3] 매퍼 생성
+==============================================================================
+
+  파일 2개:
+
+  1) ApprovalHistoryMapper.java (새로 생성)
+     경로: concurrency-lab/src/main/java/com/opro/concurrency/mapper/
+
+     메서드:
+       - void insert(ApprovalHistory history)
+       - List<ApprovalHistory> findByParticipationId(Long participationId)
+
+  2) ApprovalHistoryMapper.xml (새로 생성)
+     경로: concurrency-lab/src/main/resources/mapper/
+
+     쿼리:
+       - insert: INSERT INTO approval_history (...)
+       - findByParticipationId: SELECT ... WHERE participation_id = #{id}
+                                ORDER BY created_at DESC
+
+
+================================================================================
+[STEP 4] 서비스 수정 - approve() 변경
+================================================================================
+
+  파일: ParticipationService.java (기존 수정)
+
+  변경 전 (현재 코드):
+    try {
+        order = shopClient.createOrder(...)
+        participationMapper.updateOrderId(id, orderId)
+    } catch (Exception e) {
+        participationMapper.updateStatus(id, "APPROVED")  // 문제!
+        return findById(id)
+    }
+    participationMapper.updateStatus(id, "APPROVED")
+
+  변경 후:
+    try {
+        order = shopClient.createOrder(...)
+        participationMapper.updateOrderId(id, orderId)
+        participationMapper.updateStatus(id, "APPROVED")
+
+        // 이력: 성공 기록
+        approvalHistoryMapper.insert(ApprovalHistory.builder()
+            .participationId(id)
+            .action("APPROVE_REQUEST")
+            .status("SUCCESS")
+            .orderId(orderId)
+            .build())
+
+    } catch (Exception e) {
+        participationMapper.updateStatus(id, "APPROVE_FAILED")  // 실패 명시
+
+        // 이력: 실패 기록
+        approvalHistoryMapper.insert(ApprovalHistory.builder()
+            .participationId(id)
+            .action("APPROVE_REQUEST")
+            .status("FAILED")
+            .errorMessage(e.getMessage())
+            .build())
+    }
+    return findById(id)
+
+
+==============================================================================
+[STEP 5] 재시도 API 추가
+==============================================================================
+
+  파일 2개 수정:
+
+  1) ParticipationService.java - retryApprove() 메서드 추가
+
+     @Transactional
+     public Participation retryApprove(Long id) {
+         participation = findByIdForUpdate(id)
+         if (!"APPROVE_FAILED".equals(status)) throw ...
+
+         try {
+             order = shopClient.createOrder(...)
+             updateOrderId + updateStatus("APPROVED")
+             이력 INSERT (action="APPROVE_RETRY", status="SUCCESS")
+         } catch (Exception e) {
+             이력 INSERT (action="APPROVE_RETRY", status="FAILED")
+             // status는 APPROVE_FAILED 유지
+         }
+         return findById(id)
+     }
+
+  2) ParticipationController.java - 엔드포인트 추가
+
+     PUT /api/participations/{id}/retry-approve
+
+
+================================================================================
+[STEP 6] 이력 조회 API (선택)
+================================================================================
+
+  파일: ParticipationController.java
+
+  GET /api/participations/{id}/approval-history
+
+  → 해당 참가자의 승인 시도 이력 목록 반환
+
+
+================================================================================
+[STEP 7] 프론트 수정
+================================================================================
+
+  파일: devquest-web/src/routes/challenges.tsx
+
+  1) APPROVE_FAILED 뱃지 추가
+     - 기존 뱃지: APPLIED, SUBMITTED, APPROVED, REJECTED
+     - 추가: APPROVE_FAILED (빨간색 뱃지)
+
+  2) 재시도 버튼 추가
+     - APPROVE_FAILED 상태일 때 "재시도" 버튼 노출
+     - 클릭 시 PUT /api/participations/{id}/retry-approve 호출
+
+  3) 이력 표시 (선택)
+     - 참가자 카드에 시도 횟수 표시
+     - 또는 클릭하면 이력 목록 표시
+
+
+================================================================================
+[수정 파일 체크리스트]
+================================================================================
+
+  순서  파일                              작업
+  ────  ────────────────────────────────  ──────────────
+  1     schema.sql                         테이블 생성
+  2     ApprovalHistory.java               엔티티 (신규)
+  3     ApprovalHistoryMapper.java         매퍼 인터페이스 (신규)
+  4     ApprovalHistoryMapper.xml          매퍼 SQL (신규)
+  5     ParticipationService.java          approve() 수정 + retryApprove() 추가
+  6     ParticipationController.java       retry-approve 엔드포인트 추가
+  7     challenges.tsx                     뱃지 + 재시도 버튼
+
+================================================================================

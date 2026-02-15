@@ -1,0 +1,57 @@
+# 브랜드 정보 추가 (Create) 로직 분석
+
+## 1. 프론트엔드 (Frontend)
+
+### 1.1 행 추가 (UI)
+- **위치**: `src/pages/cps/base/brandmng/BrandRtrv.jsx`
+- **트리거**: "신규" 버튼 클릭 (`handleAirstarNew`).
+- **로직**:
+  ```javascript
+  setAirstarList((prev) => [
+      ...prev,
+      {
+          brandId: '', 
+          // ... 기타 필드 초기화
+          useYn: 'Y', 
+          _flag: 'I' // 신규 행임을 표시 (Tabulator 또는 내부 로직용 플래그)
+      },
+  ])
+  ```
+- **화면**: 그리드 하단(또는 상단)에 빈 행이 추가되어 사용자가 입력 가능해짐.
+
+### 1.2 저장 요청
+- **트리거**: "저장" 버튼 클릭 (`handleAirstarSave`).
+- **로직**:
+  - 그리드의 전체 데이터 또는 변경된 데이터를 수집.
+  - API 호출 시 `status` 필드를 "C" (Create)로 설정하여 백엔드에 전송해야 함.
+  - (현재 프론트 코드는 `_flag: 'I'`를 사용하므로, 저장 전송 직전에 `_flag: 'I'` -> `status: 'C'`로 변환하는 매핑 로직이 필요함).
+
+### 1.3 API 호출
+- **위치**: `src/api/cps/base/brandmng/BrandRtrv-fetch.js`
+- **함수**: `fetchSaveBrand(params)`
+- **요청**: `POST /api/test/brandmng/v1.0/saveBrand`
+
+## 2. 백엔드 (Backend)
+
+### 2.1 Controller
+- **위치**: `BrandMngController.java`
+- **메서드**: `saveBrand(@RequestBody BrandMng brandMng)`
+- **데이터 구조**: `BrandMng` 객체 내부에 `List<BrandMng> brandList`가 포함된 형태로 수신.
+
+### 2.2 Service
+- **위치**: `BrandMngService.java`
+- **메서드**: `saveBrandList(BrandMng brandMng)`
+- **로직**:
+  1. `brandList`를 순회.
+  2. 각 아이템의 `status` 값을 확인.
+  3. `status.equals("C")`인 경우 `brandMngMapper.insertBrand(brand)` 호출.
+
+### 2.3 Mapper (DB)
+- **XML**: `BrandMngMapper.xml` -> `id="insertBrand"`
+- **SQL**:
+  ```sql
+  INSERT INTO FSCPS.TEST_BRAND_M ( ... )
+  VALUES ( ... )
+  ```
+  - `reg_dttm`(등록일시)은 `now()`로 DB 시간 사용.
+  - `regr_id`(등록자)는 Service에서 세팅된 값을 사용.

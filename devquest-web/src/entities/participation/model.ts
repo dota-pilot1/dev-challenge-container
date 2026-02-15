@@ -19,3 +19,13 @@ export interface CreateParticipationRequest {
 export interface SubmitRequest {
   submissionUrl: string;
 }
+
+export interface ApprovalHistory {
+  id: number;
+  participationId: number;
+  action: string;
+  status: string;
+  orderId: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}

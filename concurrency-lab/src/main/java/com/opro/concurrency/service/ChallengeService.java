@@ -5,11 +5,10 @@ import com.opro.concurrency.entity.Challenge;
 import com.opro.concurrency.exception.CustomException;
 import com.opro.concurrency.exception.ErrorCode;
 import com.opro.concurrency.mapper.ChallengeMapper;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -20,11 +19,12 @@ public class ChallengeService {
     @Transactional
     public Challenge create(CreateChallengeRequest request) {
         Challenge challenge = Challenge.builder()
-                .title(request.getTitle())
-                .description(request.getDescription())
-                .rewardProductId(request.getRewardProductId())
-                .status("ACTIVE")
-                .build();
+            .title(request.getTitle())
+            .description(request.getDescription())
+            .rewardProductId(request.getRewardProductId())
+            .rewardQuantity(request.getRewardQuantity())
+            .status("ACTIVE")
+            .build();
 
         challengeMapper.insert(challenge);
         return challenge;
@@ -35,7 +35,13 @@ public class ChallengeService {
     }
 
     public Challenge findById(Long id) {
-        return challengeMapper.findById(id)
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "챌린지를 찾을 수 없습니다"));
+        return challengeMapper
+            .findById(id)
+            .orElseThrow(() ->
+                new CustomException(
+                    ErrorCode.INVALID_REQUEST,
+                    "챌린지를 찾을 수 없습니다"
+                )
+            );
     }
 }

@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { parseErrorMessage } from "@/shared/lib/parse-error-message";
 import { Modal, ModalHeader, ModalBody } from "@/shared/ui/modal";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -46,6 +49,7 @@ const pStatusConfig: Record<
   APPLIED: { label: "참가 신청", variant: "outline" },
   SUBMITTED: { label: "제출 완료", variant: "secondary" },
   APPROVED: { label: "승인", variant: "default" },
+  APPROVE_FAILED: { label: "승인 실패", variant: "destructive" },
   REJECTED: { label: "반려", variant: "destructive" },
 };
 
@@ -57,6 +61,7 @@ function ChallengesPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [rewardProductId, setRewardProductId] = useState("");
+  const [rewardQuantity, setRewardQuantity] = useState("1");
 
   const [detailChallenge, setDetailChallenge] = useState<Challenge | null>(
     null,
@@ -64,6 +69,36 @@ function ChallengesPage() {
 
   const [submitTargetId, setSubmitTargetId] = useState<number | null>(null);
   const [submissionUrl, setSubmissionUrl] = useState("");
+
+  const [errorDialog, setErrorDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+  }>({ open: false, title: "", description: "" });
+
+  const showErrorFromHistory = useCallback(
+    async (participationId: number, title: string) => {
+      try {
+        const history =
+          await participationsApi.getApprovalHistory(participationId);
+        const latest = history.find((h) => h.status === "FAILED");
+        const rawMessage =
+          latest?.errorMessage || "알 수 없는 오류가 발생했습니다.";
+        setErrorDialog({
+          open: true,
+          title,
+          description: parseErrorMessage(rawMessage),
+        });
+      } catch {
+        setErrorDialog({
+          open: true,
+          title,
+          description: "오류 상세 정보를 가져올 수 없습니다.",
+        });
+      }
+    },
+    [],
+  );
 
   const { data: challenges = [], isLoading } = useQuery({
     queryKey: ["challenges"],
@@ -94,6 +129,7 @@ function ChallengesPage() {
       setTitle("");
       setDescription("");
       setRewardProductId("");
+      setRewardQuantity("1");
     },
   });
 
@@ -119,7 +155,26 @@ function ChallengesPage() {
 
   const approveMutation = useMutation({
     mutationFn: participationsApi.approve,
-    onSuccess: invalidateAll,
+    onSuccess: (data) => {
+      invalidateAll();
+      if (data.status === "APPROVED") {
+        toast.success("승인 완료");
+      } else if (data.status === "APPROVE_FAILED") {
+        showErrorFromHistory(data.id, "승인 실패");
+      }
+    },
+  });
+
+  const retryApproveMutation = useMutation({
+    mutationFn: participationsApi.retryApprove,
+    onSuccess: (data) => {
+      invalidateAll();
+      if (data.status === "APPROVED") {
+        toast.success("승인 재시도 성공");
+      } else if (data.status === "APPROVE_FAILED") {
+        showErrorFromHistory(data.id, "재시도 실패");
+      }
+    },
   });
 
   const rejectMutation = useMutation({
@@ -154,6 +209,7 @@ function ChallengesPage() {
                   title,
                   description: description || undefined,
                   rewardProductId: Number(rewardProductId),
+                  rewardQuantity: Number(rewardQuantity),
                 });
               }}
               className="space-y-4"
@@ -195,6 +251,18 @@ function ChallengesPage() {
                   ))}
                 </select>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="rewardQuantity">보상 수량</Label>
+                <Input
+                  id="rewardQuantity"
+                  type="number"
+                  min={1}
+                  value={rewardQuantity}
+                  onChange={(e) => setRewardQuantity(e.target.value)}
+                  placeholder="1"
+                  required
+                />
+              </div>
               <Button
                 type="submit"
                 className="w-full"
@@ -219,6 +287,7 @@ function ChallengesPage() {
               <TableHead>제목</TableHead>
               <TableHead>설명</TableHead>
               <TableHead>보상 상품</TableHead>
+              <TableHead className="w-16 text-center">수량</TableHead>
               <TableHead className="w-20 text-center">상세</TableHead>
             </TableRow>
           </TableHeader>
@@ -232,6 +301,9 @@ function ChallengesPage() {
                 </TableCell>
                 <TableCell>
                   {getProductName(challenge.rewardProductId)}
+                </TableCell>
+                <TableCell className="text-center">
+                  {challenge.rewardQuantity}
                 </TableCell>
                 <TableCell className="text-center">
                   <Button
@@ -282,6 +354,9 @@ function ChallengesPage() {
                       <Badge variant="secondary">
                         {getProductName(detailChallenge.rewardProductId)}
                       </Badge>
+                      <span className="text-muted-foreground">
+                        x {detailChallenge.rewardQuantity}개
+                      </span>
                     </div>
                   </div>
 
@@ -396,6 +471,18 @@ function ChallengesPage() {
                                       </Button>
                                     </>
                                   )}
+                                  {p.status === "APPROVE_FAILED" && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        retryApproveMutation.mutate(p.id)
+                                      }
+                                      disabled={retryApproveMutation.isPending}
+                                    >
+                                      재시도
+                                    </Button>
+                                  )}
                                   {p.status === "SUBMITTED" && (
                                     <>
                                       <Button
@@ -486,6 +573,14 @@ function ChallengesPage() {
           </>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={errorDialog.open}
+        onOpenChange={(open) => setErrorDialog((prev) => ({ ...prev, open }))}
+        title={errorDialog.title}
+        description={errorDialog.description}
+        variant="destructive"
+      />
     </div>
   );
 }

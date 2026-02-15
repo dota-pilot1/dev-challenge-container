@@ -1,0 +1,227 @@
+# 관련 프론트 엔드 파일 소스 모음
+
+본 문서는 메뉴 표시 및 상태 관리와 관련된 핵심 프론트엔드 파일들의 실제 소스 코드를 포함하고 있습니다.
+
+## 1. Header.jsx
+`src/components/common/layout/Header.jsx`
+
+```jsx
+import React, { useState } from 'react'
+import { useFwTab } from 'hooks/common/use-fw-tab'
+import { getUserInfoFromSessionStorage } from 'utils/user-info-storage-util'
+import UserChangePopup from 'pages/userchange/UserChangePopup'
+import { useRecoilState } from 'recoil'
+import { fwLeftMenuOpenAtom } from 'store/atoms/layout/menu-atom'
+
+export default function Header() {
+  const { fwMenu, handleActive, handleClickHome } = useFwTab()
+  const [fwLeftMenuOpen, setFwLeftMenuOpen] = useRecoilState(fwLeftMenuOpenAtom)
+  const [popupOpen, setPopupOpen] = useState(false)
+
+  const handleOpClPopup = (boolean) => {
+    setPopupOpen(boolean)
+  }
+  const toggleClick = () => {
+    setFwLeftMenuOpen(!fwLeftMenuOpen)
+  }
+
+  // 메뉴 예제 제외
+  const settingMenu = (val) => {
+    if (process.env.REACT_APP_NODE_ENV === 'production' || process.env.REACT_APP_NODE_ENV === 'qa') {
+      if (String(val?.id)?.substring(12, 16) !== '1299') return val?.menuName
+    } else {
+      return val?.menuName
+    }
+  }
+
+  // 실행시스템
+  const execName = () => {
+    if (process.env.REACT_APP_NAME === 'FSCPS') {
+      return 'FS통합결제'
+    } else {
+      return 'FS메뉴'
+    }
+  }
+
+  // 실행환경
+  const envName = () => {
+    if (process.env.REACT_APP_NODE_ENV === 'production') {
+      return ''
+    } else {
+      return process.env.REACT_APP_NODE_ENV.toUpperCase()
+    }
+  }
+
+  return (
+    <>
+      <div className="header">
+        <div className="header-first-line">
+          <div className="header-menu">
+            <h1 className="logo" onClick={handleClickHome} style={{ marginLeft: '24px', cursor: 'pointer' }}>
+              CJ FRESHWAY
+              <span>{execName()}</span>
+              <span style={{color: '#ffff00'}}>{envName()}</span>
+            </h1>
+            <ul className="header-1depth">
+              {fwMenu?.map((item) => (
+                <li key={item.id}>
+                  <button className={`btn-text ${item.active ? 'active' : ''}`} onClick={() => handleActive(item.id)}>
+                    {settingMenu(item)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="nav-right-menu">
+            <p className="user-name">
+              {getUserInfoFromSessionStorage().username}
+              <span className="ps-2 ml8">환영합니다.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+      {popupOpen && <UserChangePopup onClose={handleOpClPopup} />}
+    </>
+  )
+}
+```
+
+## 2. LeftMenu.jsx
+`src/components/common/layout/LeftMenu.jsx`
+
+```jsx
+import { useFwTab } from 'hooks/common/use-fw-tab'
+import 'assets/style/common.scss'
+import { useState } from 'react'
+import { useRecoilState } from 'recoil'
+import { fwLeftMenuOpenAtom } from 'store/atoms/layout/menu-atom'
+import { tabStore, currentTabIndexStore } from 'store/atoms/layout/tabs-atom'
+import { retryLazy } from 'lazyUtil'
+
+const devMenuList = [
+  {
+    id: 'IPIC-COM-FS-12010803',
+    menuName: '브랜드 조회',
+    componentName: 'BrandRtrv',
+    component: 'pages/cps/base/brandmng/BrandRtrv',
+    no: '0712010803',
+    comp: retryLazy(() => import('pages/cps/base/brandmng/BrandRtrv')),
+  },
+  // ... (Other dev menus)
+]
+
+export default function LeftMenu() {
+  const { fwLeftMenu, handleActiveLeftMenu } = useFwTab()
+  const [fwLeftMenuOpen, setFwLeftMenuOpen] = useRecoilState(fwLeftMenuOpenAtom)
+  const [tabs, setTabs] = useRecoilState(tabStore)
+  const [currentTabIndex, setCurrentTabIndex] = useRecoilState(currentTabIndexStore)
+
+  const toggleClick = () => {
+    setFwLeftMenuOpen(!fwLeftMenuOpen)
+  }
+
+  return (
+    <>
+      <div className={`left-menu ${fwLeftMenuOpen ? '' : 'toggled'}`}>
+        <div className="btn-toggle" onClick={toggleClick}>
+          <span>{fwLeftMenuOpen ? '<' : '>'}</span>
+        </div>
+        <div className="left-top-title">
+          <h2>{fwLeftMenu.menuName}</h2>
+        </div>
+        <div className="left-menu-wrap">
+          {fwLeftMenu.subMenus &&
+            fwLeftMenu.subMenus.map((item) => (
+              <ul className="left-menu-1depth" key={item.id}>
+                <li>
+                  <button
+                    className={`title-1depth ${item.active ? 'active' : ''}`}
+                    onClick={() => handleActiveLeftMenu(item.id)}
+                  >
+                    {item.menuName}
+                  </button>
+                </li>
+                <li>
+                  <ul className="left-menu-2depth">
+                    {item.subMenus &&
+                      item.subMenus.map((subItem) => (
+                        <li className={`left-menu-2depth-li ${item.active ? 'active' : 'hide'}`} key={subItem.id}>
+                          <button
+                            className={`title-2depth ${subItem.active ? 'active' : ''}`}
+                            onClick={() => handleActiveLeftMenu(subItem.id)}
+                          >
+                            {subItem.menuName}
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                </li>
+              </ul>
+            ))}
+        </div>
+        {/* 하드코딩 개발 메뉴 영역 생략 */}
+      </div>
+    </>
+  )
+}
+```
+
+## 3. use-fw-tab.js
+`src/hooks/common/use-fw-tab.js`
+
+```javascript
+import { useConfirm } from 'hooks/popup/use-common-popup'
+import { isEmpty } from 'lodash'
+import { useRecoilState, useSetRecoilState } from 'recoil'
+import { fwLeftMenuState, fwMenuState, fwLeftMenuOpenAtom, fwLeftMenuNameAtom } from 'store/atoms/layout/menu-atom'
+import { currentTabIndexStore, tabStore, topLevelstore } from 'store/atoms/layout/tabs-atom'
+import { getMessage } from 'utils/message-util'
+
+export const useFwTab = () => {
+  const [topLevel, setTopLevel] = useRecoilState(topLevelstore)
+  const [tabs, setTabs] = useRecoilState(tabStore)
+  const [currentTabIndex, setCurrentTabIndex] = useRecoilState(currentTabIndexStore)
+  const [fwMenu, setFwMenu] = useRecoilState(fwMenuState)
+  const [fwLeftMenu, setFwLeftMenu] = useRecoilState(fwLeftMenuState)
+  const setFwLeftMenuOpen = useSetRecoilState(fwLeftMenuOpenAtom)
+  const [fwMenuName, setFwMenuName] = useRecoilState(fwLeftMenuNameAtom)
+
+  // 상단 GNB 메뉴 클릭시 호출
+  const handleActive = (id) => {
+    if (id < 0) return
+    setTopLevel(id)
+    const currentMenu = fwMenu.map((m) => {
+      let menu = { ...m, active: false }
+      if (m.id === id) {
+        menu.active = !menu.active
+      }
+      return menu
+    })
+    setFwMenu(currentMenu)
+    setFwLeftMenuOpen(true)
+    
+    // 선택된 Top Level 메뉴의 하위 메뉴를 fwLeftMenu 상태로 설정
+    const currentLeftSubMenu = fwMenu.filter((m) => m.id === id)[0].subMenus.map((sm) => {
+      let subMenu = { ...sm, active: true }
+      return subMenu
+    })
+    const currentLeftMenu = [fwMenu.filter((m) => m.id === id)[0]].map((m) => {
+      let menu = { ...m, subMenus: currentLeftSubMenu }
+      return menu
+    })
+    setFwLeftMenu(currentLeftMenu[0])
+  }
+
+  // ... (Other functions omitted)
+
+  return {
+    tabs,
+    currentTabIndex,
+    fwMenu,
+    fwLeftMenu,
+    fwMenuName,
+    handleActive,
+    // ...
+  }
+}
+```

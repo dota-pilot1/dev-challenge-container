@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.cj.freshway.fs.test.brandmng.BrandMngMapper">
+	<!--
+	 * 에어스타 브랜드 조회
+	 * @author Test
+	 * 2026.02.10
+	 -->
+	<select id="selectBrandList" parameterType="com.cj.freshway.fs.test.brandmng.BrandMngSearchDto" resultType="com.cj.freshway.fs.test.brandmng.BrandMng">
+		SELECT	/* com.cj.freshway.fs.test.brandmng.selectBrandList */
+		    ROW_NUMBER() OVER (ORDER BY BRAND_ID ASC) AS ROW_NUM
+			  , CO_ID
+			  , BRAND_ID
+			  , BRAND_NAME_KO
+			  , BRAND_NAME_EN
+			  , BRAND_NAME_JP
+			  , BRAND_NAME_CN_SIMP
+			  , BRAND_NAME_CN_TRAD
+			  , BRAND_DESC
+			  , USE_YN
+		FROM	FSCPS.TEST_BRAND_M
+		WHERE	1 = 1
+		AND		CO_ID = #{coId}
+		<if test="useYn != null and useYn != ''">
+		  AND USE_YN = #{useYn}
+		</if>
+	  	ORDER BY
+	  			BRAND_ID
+	</select>
+
+	<!--
+	 * 에어스타 브랜드 등록
+	 * @author Test
+	 * 2026.02.10
+	 -->
+	<insert id="insertBrand" parameterType="com.cj.freshway.fs.test.brandmng.BrandMng">
+		INSERT	/* com.cj.freshway.fs.test.brandmng.BrandMngMapper.insertBrand */
+		INTO	FSCPS.TEST_BRAND_M
+			   (
+			   	CO_ID
+			  , BRAND_ID
+			  , BRAND_NAME_KO
+			  , BRAND_NAME_EN
+			  , BRAND_NAME_JP
+			  , BRAND_NAME_CN_SIMP
+			  , BRAND_NAME_CN_TRAD
+			  , BRAND_DESC
+			  , USE_YN
+			  , REG_DTTM
+			  , REGR_ID
+			  , UPDT_DTTM
+			  , UPDT_ID
+			   )
+		VALUES
+			   (
+				#{coId}
+			  , #{brandId}
+			  , #{brandNameKo}
+			  , #{brandNameEn}
+			  , #{brandNameJp}
+			  , #{brandNameCnSimp}
+			  , #{brandNameCnTrad}
+			  , #{brandDesc}
+			  , #{useYn}
+			  , now()
+			  , #{regrId}
+			  , now()
+			  , #{regrId}
+			   )
+	</insert>
+
+	<!--
+	 * 에어스타 브랜드 수정
+	 * @author Test
+	 * 2026.02.10
+	 -->
+	<update id="updateBrand" parameterType="com.cj.freshway.fs.test.brandmng.BrandMng">
+		UPDATE	/* com.cj.freshway.fs.test.brandmng.updateBrand */
+				FSCPS.TEST_BRAND_M
+		SET		BRAND_NAME_KO      = #{brandNameKo}
+			  , BRAND_NAME_EN      = #{brandNameEn}
+			  , BRAND_NAME_JP      = #{brandNameJp}
+			  , BRAND_NAME_CN_SIMP = #{brandNameCnSimp}
+			  , BRAND_NAME_CN_TRAD = #{brandNameCnTrad}
+			  , BRAND_DESC         = #{brandDesc}
+			  , USE_YN             = #{useYn}
+			  , UPDT_DTTM          = now()
+			  , UPDT_ID            = #{regrId}
+		WHERE	CO_ID    = #{coId}
+		AND		BRAND_ID = #{brandId}
+	</update>
+
+	<!--
+	 * 플랫폼 브랜드 조회
+	 * @author Test
+	 * 2026.02.10
+	 -->
+	<select id="selectPlatformBrandList" parameterType="com.cj.freshway.fs.test.brandmng.BrandMngSearchDto" resultType="com.cj.freshway.fs.test.brandmng.BrandMng">
+		SELECT	/* com.cj.freshway.fs.test.brandmng.selectPlatformBrandList */
+		    ROW_NUMBER() OVER (ORDER BY BRAND_ID ASC) AS ROW_NUM
+			  , CO_ID
+			  , BRAND_ID
+			  , BRAND_NAME_KO
+			  , BRAND_NAME_EN
+			  , BRAND_NAME_JP
+			  , BRAND_NAME_CN_SIMP
+			  , BRAND_NAME_CN_TRAD
+			  , STD_CATEGORY_CD
+			  , USE_YN
+		FROM	FSCPS.TEST_PLATFORM_BRAND_M
+		WHERE	1 = 1
+		AND		CO_ID = #{coId}
+		<if test="useYn != null and useYn != ''">
+		  AND USE_YN = #{useYn}
+		</if>
+	  	ORDER BY
+	  			BRAND_ID
+	</select>
+</mapper>

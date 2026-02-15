@@ -13,6 +13,7 @@ import { Route as ShopRouteImport } from './routes/shop'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as ConcurrencyTestRouteImport } from './routes/concurrency-test'
 import { Route as ChallengesRouteImport } from './routes/challenges'
+import { Route as ApprovalHistoryRouteImport } from './routes/approval-history'
 import { Route as IndexRouteImport } from './routes/index'
 
 const ShopRoute = ShopRouteImport.update({
@@ -35,6 +36,11 @@ const ChallengesRoute = ChallengesRouteImport.update({
   path: '/challenges',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApprovalHistoryRoute = ApprovalHistoryRouteImport.update({
+  id: '/approval-history',
+  path: '/approval-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,6 +49,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/approval-history': typeof ApprovalHistoryRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/orders': typeof OrdersRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/approval-history': typeof ApprovalHistoryRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/orders': typeof OrdersRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/approval-history': typeof ApprovalHistoryRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/orders': typeof OrdersRoute
@@ -65,12 +74,25 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/challenges' | '/concurrency-test' | '/orders' | '/shop'
+  fullPaths:
+    | '/'
+    | '/approval-history'
+    | '/challenges'
+    | '/concurrency-test'
+    | '/orders'
+    | '/shop'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/challenges' | '/concurrency-test' | '/orders' | '/shop'
+  to:
+    | '/'
+    | '/approval-history'
+    | '/challenges'
+    | '/concurrency-test'
+    | '/orders'
+    | '/shop'
   id:
     | '__root__'
     | '/'
+    | '/approval-history'
     | '/challenges'
     | '/concurrency-test'
     | '/orders'
@@ -79,6 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApprovalHistoryRoute: typeof ApprovalHistoryRoute
   ChallengesRoute: typeof ChallengesRoute
   ConcurrencyTestRoute: typeof ConcurrencyTestRoute
   OrdersRoute: typeof OrdersRoute
@@ -115,6 +138,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChallengesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/approval-history': {
+      id: '/approval-history'
+      path: '/approval-history'
+      fullPath: '/approval-history'
+      preLoaderRoute: typeof ApprovalHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -127,6 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApprovalHistoryRoute: ApprovalHistoryRoute,
   ChallengesRoute: ChallengesRoute,
   ConcurrencyTestRoute: ConcurrencyTestRoute,
   OrdersRoute: OrdersRoute,

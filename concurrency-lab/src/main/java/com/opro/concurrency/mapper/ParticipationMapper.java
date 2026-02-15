@@ -12,6 +12,8 @@ public interface ParticipationMapper {
 
     Optional<Participation> findById(@Param("id") Long id);
 
+    Optional<Participation> findByIdForUpdate(@Param("id") Long id);
+
     List<Participation> findByChallengeId(
         @Param("challengeId") Long challengeId
     );

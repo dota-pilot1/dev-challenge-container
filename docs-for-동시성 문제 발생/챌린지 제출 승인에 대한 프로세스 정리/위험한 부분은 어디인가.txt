@@ -1,0 +1,219 @@
+========================================
+ DevQuest 동시성/분산 트랜잭션 위험 분석
+========================================
+
+[시스템 구조]
+
+  concurrency-lab (Spring Boot, :8080, PostgreSQL :5434)
+         |
+         | HTTP (RestClient)
+         v
+  shop-api (NestJS, :3000, PostgreSQL :5435)
+
+  - 두 서버가 각자의 DB를 가짐
+  - 서버 간 통신은 HTTP (동기 호출)
+  - 분산 트랜잭션 미적용 상태
+
+
+========================================
+ 승인 흐름 (현재 코드)
+========================================
+
+  관리자가 "승인" 클릭
+    |
+    v
+  1. participation 조회 (status = SUBMITTED 확인)
+  2. challenge 조회 (보상 상품 ID 획득)
+  3. shopClient.createOrder() ← HTTP 호출 (shop-api)
+       |
+       v  [shop-api 내부]
+       a. SELECT product (재고 확인)
+       b. UPDATE product SET stock = stock - 1 (재고 차감)
+       c. INSERT order (주문 생성)
+       d. 응답 반환 {id, productId, ...}
+       |
+    4. participationMapper.updateOrderId(id, orderId)
+    5. participationMapper.updateStatus(id, "APPROVED")
+    6. 완료
+
+
+========================================
+ 위험 지점 1: 중복 승인 (Double Approve)
+========================================
+
+[상황]
+  관리자가 승인 버튼을 빠르게 2번 클릭하거나,
+  두 관리자가 동시에 같은 참가자를 승인하는 경우
+
+[현재 코드]
+  ParticipationService.approve():
+    if (!"SUBMITTED".equals(participation.getStatus())) {
+        throw new CustomException(...);
+    }
+  → 단순 상태 체크만 있고, DB 레벨 잠금이 없음
+
+[발생 시나리오]
+  Thread A: findById() → status = SUBMITTED ✓
+  Thread B: findById() → status = SUBMITTED ✓ (아직 A가 UPDATE 안 함)
+  Thread A: shopClient.createOrder() → 주문 #101 생성
+  Thread B: shopClient.createOrder() → 주문 #102 생성 (중복!)
+  Thread A: updateStatus("APPROVED")
+  Thread B: updateStatus("APPROVED")
+
+[결과]
+  - 주문이 2개 생성됨 (재고 2개 차감)
+  - 보상 상품이 이중 지급됨
+  - participation.order_id는 마지막에 쓴 값(#102)만 남음 (Lost Update)
+
+[현재 처리]
+  없음. 아무런 동시성 제어가 없음.
+
+
+========================================
+ 위험 지점 2: 부분 실패 (Partial Failure)
+========================================
+
+[상황]
+  shop-api에 주문 요청은 성공했지만,
+  그 후 concurrency-lab에서 상태 업데이트가 실패하는 경우
+
+[현재 코드]
+  try {
+      Map<String, Object> order = shopClient.createOrder(...);
+      participationMapper.updateOrderId(id, orderId);  ← 여기서 실패하면?
+  } catch (Exception e) {
+      participationMapper.updateStatus(id, "APPROVED");
+      // 주문 실패해도 APPROVED 처리!
+      return findById(id);
+  }
+  participationMapper.updateStatus(id, "APPROVED");
+
+[발생 시나리오 A - shop-api 성공 후 concurrency-lab DB 실패]
+  1. shopClient.createOrder() → 주문 #101 생성, 재고 차감 완료
+  2. updateOrderId() → DB 커넥션 끊김 등으로 실패
+  3. @Transactional 롤백 → participation은 여전히 SUBMITTED
+  4. 하지만 shop-api의 주문 #101과 재고 차감은 이미 커밋됨
+
+  결과: shop-api에는 주문이 있지만, concurrency-lab에서는 모르는 상태
+        → 유령 주문 발생, 재고 불일치
+
+[발생 시나리오 B - shop-api 호출 실패]
+  1. shopClient.createOrder() → 네트워크 타임아웃
+  2. catch 블록 진입 → updateStatus("APPROVED") 실행
+  3. 주문 없이 승인 처리됨
+
+  결과: participation은 APPROVED인데 order_id는 NULL
+        → 보상 상품 미지급
+
+[발생 시나리오 C - shop-api 타임아웃 but 실제로는 성공]
+  1. shopClient.createOrder() → 요청 전송됨
+  2. shop-api에서 주문 생성 완료 (재고 차감됨)
+  3. 응답이 네트워크 지연으로 타임아웃
+  4. concurrency-lab에서는 실패로 판단 → catch 블록 진입
+  5. 주문 없이 APPROVED 처리
+
+  결과: shop-api에는 주문이 존재, concurrency-lab에서는 모름
+        → 유령 주문 + 재고 불일치
+
+[현재 처리]
+  catch 블록에서 로그만 남기고 APPROVED 처리.
+  보상 트랜잭션(Saga) 없음. 재시도 없음.
+
+
+========================================
+ 위험 지점 3: 재고 Race Condition
+========================================
+
+[상황]
+  shop-api에서 동시에 여러 주문이 들어오면
+  재고 차감에서 경합 발생
+
+[현재 코드 - shop-api OrderService.create()]
+  const [product] = await this.db.select()...  // 재고 확인: stock = 1
+  if (product.stock < quantity) throw ...       // 1 >= 1 → 통과
+  await this.db.update(products)
+    .set({ stock: product.stock - quantity })   // SET stock = 0
+    .where(eq(products.id, dto.productId));
+
+[발생 시나리오]
+  재고: 1개
+
+  Request A: SELECT → stock = 1 → 통과
+  Request B: SELECT → stock = 1 → 통과 (아직 A의 UPDATE 미반영)
+  Request A: UPDATE SET stock = 0
+  Request B: UPDATE SET stock = 0 (이미 0인데 다시 0으로 = 실제론 -1이어야 함)
+
+  결과: 재고 1개인데 주문 2개 성공 → 초과 판매
+
+[현재 처리]
+  없음. 낙관적/비관적 잠금 모두 미적용.
+  코드 주석에 "동시성 제어 없음 - 2단계에서 해결" 명시됨.
+
+
+========================================
+ 위험 지점 4: Lost Update
+========================================
+
+[상황]
+  같은 participation을 동시에 여러 곳에서 수정
+
+[현재 코드]
+  updateStatus와 updateOrderId가 별도 쿼리로 실행됨:
+    UPDATE participation SET order_id = #{orderId} WHERE id = #{id}
+    UPDATE participation SET status = 'APPROVED' WHERE id = #{id}
+
+[발생 시나리오]
+  Thread A: updateOrderId(1, 101)  → order_id = 101
+  Thread B: updateStatus(1, "REJECTED")  → status = REJECTED (관리자가 반려)
+  Thread A: updateStatus(1, "APPROVED")  → status = APPROVED (덮어씀)
+
+  결과: 반려했는데 승인으로 덮어쓰기됨
+
+[현재 처리]
+  없음. WHERE 조건에 version이나 이전 status 체크 없음.
+
+
+========================================
+ 위험 지점 5: 네트워크 장애 시 데이터 불일치
+========================================
+
+[상황]
+  concurrency-lab ↔ shop-api 간 네트워크가 불안정한 경우
+
+[현재 코드]
+  ShopClient에 타임아웃 설정 없음.
+  재시도(retry) 로직 없음.
+  멱등성(idempotency) 키 없음.
+
+[발생 시나리오]
+  1. 주문 요청 → shop-api에서 처리 완료
+  2. 응답 전송 중 네트워크 끊김
+  3. concurrency-lab에서 재시도
+  4. shop-api에서 또 주문 생성 (중복)
+
+[현재 처리]
+  없음. 멱등성 키 미적용, 재시도 미구현.
+
+
+========================================
+ 요약 표
+========================================
+
+  위험 지점              | 발생 확률 | 영향도 | 현재 처리
+  ----------------------|---------|-------|----------
+  1. 중복 승인           | 높음    | 높음  | 없음
+  2. 부분 실패           | 중간    | 높음  | 로그만
+  3. 재고 Race Condition | 높음    | 높음  | 없음
+  4. Lost Update        | 중간    | 중간  | 없음
+  5. 네트워크 장애        | 낮음    | 높음  | 없음
+
+
+========================================
+ 해결 방향 (2단계에서 구현 예정)
+========================================
+
+  1. 중복 승인 → 비관적 잠금(SELECT FOR UPDATE) 또는 낙관적 잠금(version 컬럼)
+  2. 부분 실패 → Saga 패턴 (보상 트랜잭션: 실패 시 shop-api 주문 취소)
+  3. 재고 Race Condition → DB 레벨 잠금 (FOR UPDATE) 또는 원자적 UPDATE (SET stock = stock - 1 WHERE stock >= 1)
+  4. Lost Update → 낙관적 잠금 (version 컬럼 + WHERE version = ?)
+  5. 네트워크 장애 → 멱등성 키 + 재시도 로직 + 타임아웃 설정

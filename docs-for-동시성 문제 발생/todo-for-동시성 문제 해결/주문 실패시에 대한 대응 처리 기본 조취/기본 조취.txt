@@ -1,0 +1,68 @@
+================================================================================
+  주문 실패 시 빈 승인 해결 - 구체적 조치 방법
+================================================================================
+
+
+[현재 문제]
+
+  catch 블록에서 주문 실패해도 status = APPROVED 로 저장
+  → 승인은 됐는데 order_id = NULL → 보상 없는 승인
+
+
+[해결: status 값 하나 추가 - APPROVE_FAILED]
+
+  테이블 구조 변경 없음. 컬럼 추가 없음. 새 테이블 없음.
+  participation 테이블의 status 값에 APPROVE_FAILED만 추가.
+
+  기존 상태:
+    APPLIED → SUBMITTED → APPROVED / REJECTED
+
+  변경 후:
+    APPLIED → SUBMITTED → APPROVED / REJECTED / APPROVE_FAILED
+
+
+[코드 변경]
+
+  ParticipationService.approve() catch 블록:
+
+    변경 전:
+      catch (Exception e) {
+          participationMapper.updateStatus(id, "APPROVED");  // 주문 없이 승인
+      }
+
+    변경 후:
+      catch (Exception e) {
+          participationMapper.updateStatus(id, "APPROVE_FAILED");  // 실패 명시
+      }
+
+  이것만으로:
+    - 관리자가 APPROVE_FAILED 상태를 보고 "주문 생성이 실패했구나" 인지 가능
+    - 프론트에서 APPROVE_FAILED 건만 필터링해서 "재시도" 버튼 노출 가능
+    - APPROVED인데 order_id = NULL인 애매한 상태가 사라짐
+
+
+[추가로 하면 좋은 것 - 재시도 API]
+
+  APPROVE_FAILED 상태에서 다시 승인 시도할 수 있는 retry 엔드포인트:
+
+    PUT /api/participations/{id}/retry-approve
+
+    로직:
+      1. status = APPROVE_FAILED 인지 확인
+      2. shop-api 주문 재요청
+      3. 성공 → APPROVED + order_id 저장
+      4. 실패 → APPROVE_FAILED 유지
+
+  이러면 관리자가 수동으로 재시도 가능.
+
+
+[정리]
+
+  수정 범위          내용
+  ────────────────  ──────────────────────────────────
+  DB 테이블          변경 없음 (status는 VARCHAR라 값만 추가)
+  ParticipationService  catch 블록 "APPROVED" → "APPROVE_FAILED"
+  프론트 (선택)      APPROVE_FAILED 뱃지 + 재시도 버튼
+  새 API (선택)      PUT /retry-approve
+
+================================================================================

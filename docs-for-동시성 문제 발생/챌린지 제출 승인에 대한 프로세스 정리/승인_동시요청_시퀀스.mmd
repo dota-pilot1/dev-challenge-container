@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant A as 관리자 A
+    participant B as 관리자 B
+    participant CL as concurrency-lab
+    participant CL_DB as concurrency-lab DB
+    participant Shop as shop-api
+    participant Shop_DB as shop-api DB
+
+    Note over A, Shop_DB: 동시 승인: 같은 participation을 두 명이 동시에 승인
+
+    A->>CL: PUT /approve (id=5)
+    B->>CL: PUT /approve (id=5)
+
+    rect rgb(255, 245, 220)
+        Note over CL, CL_DB: 두 요청 모두 SUBMITTED 읽음 (락 없음)
+        CL->>CL_DB: SELECT participation id=5 (요청A)
+        CL_DB-->>CL: status=SUBMITTED ✓
+        CL->>CL_DB: SELECT participation id=5 (요청B)
+        CL_DB-->>CL: status=SUBMITTED ✓
+    end
+
+    rect rgb(255, 220, 220)
+        Note over CL, Shop_DB: 두 요청 모두 주문 생성 → 이중 지급
+
+        CL->>Shop: POST /orders (요청A)
+        Shop->>Shop_DB: 재고 차감 + 주문 생성
+        Shop-->>CL: orderId=43
+
+        CL->>Shop: POST /orders (요청B)
+        Shop->>Shop_DB: 재고 차감 + 주문 생성
+        Shop-->>CL: orderId=44
+
+        CL->>CL_DB: SET order_id=43, APPROVED (요청A)
+        CL->>CL_DB: SET order_id=44, APPROVED (요청B, 덮어씀)
+    end
+
+    Note over CL_DB, Shop_DB: concurrency-lab: order_id=44 (43은 유실)<br/>shop-api: 주문 43 + 44 둘 다 존재<br/>→ ❌ 이중 지급 + 미아 주문(43)

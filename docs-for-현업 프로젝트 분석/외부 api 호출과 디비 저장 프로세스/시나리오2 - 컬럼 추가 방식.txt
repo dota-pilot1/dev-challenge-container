@@ -1,0 +1,387 @@
+================================================================================
+  시나리오 2: 컬럼 추가 방식 (sync_status 상태 관리)
+================================================================================
+
+  난이도: ★★★☆☆ (중)
+  스키마 변경: ALTER TABLE 1줄 (sync_status 컬럼 추가)
+  추가 개발: Service 분리 + 상태 업데이트 + 재시도 API/버튼
+
+  ※ 추천 방식 - 안전성과 구현 난이도의 균형이 가장 좋음
+
+================================================================================
+  1. 개요
+================================================================================
+
+  기존 비즈니스 테이블(bs_airstar_brand)에 sync_status 컬럼을 추가하여
+  각 레코드의 FNB+ 동기화 상태를 직접 추적하는 방식.
+
+  핵심 아이디어:
+  - DB 저장 시 sync_status = 'PENDING' 으로 기록 (커밋 완료)
+  - 트랜잭션 밖에서 API 호출
+  - API 성공 → sync_status = 'SUCCESS'
+  - API 실패 → sync_status = 'FAIL' (데이터는 DB에 유지)
+  - FAIL 건은 재시도 버튼으로 나중에 다시 시도 가능
+
+  핵심 차이 (시나리오 1과 비교):
+  - 시나리오 1: 최종 실패 → DB 롤백 → 데이터 유실
+  - 시나리오 2: 최종 실패 → DB 유지 + FAIL 기록 → 나중에 재시도 가능
+
+================================================================================
+  2. DDL (스키마 변경)
+================================================================================
+
+  ALTER TABLE fscps.bs_airstar_brand
+  ADD COLUMN sync_status VARCHAR(10) DEFAULT 'NONE';
+
+  -- 상태값 정의:
+  -- NONE    : 동기화 대상 아님 (기존 데이터 호환)
+  -- PENDING : DB 저장 완료, API 미호출
+  -- SUCCESS : API 호출 성공 (FNB+ 동기화 완료)
+  -- FAIL    : API 호출 실패 (재시도 대상)
+
+  COMMENT ON COLUMN fscps.bs_airstar_brand.sync_status
+  IS '플랫폼 동기화 상태 (NONE/PENDING/SUCCESS/FAIL)';
+
+  ※ DEFAULT를 'NONE'으로 설정하면 기존 데이터에 영향 없음
+  ※ 신규 저장 시에만 'PENDING'으로 세팅
+
+================================================================================
+  3. 구현 코드
+================================================================================
+
+--------------------------------------------------------------------------------
+  Step 1: MyBatis Mapper 수정
+--------------------------------------------------------------------------------
+
+  <!-- AirstarBrandMapper.xml -->
+
+  <!-- 기존 INSERT에 sync_status 추가 -->
+  <insert id="insertPartnerBrand">
+    INSERT INTO fscps.bs_airstar_brand (
+      co_id, brand_code, brand_nm, shop_id, ste_id,
+      use_yn, ... , sync_status
+    ) VALUES (
+      #{coId}, #{brandCode}, #{brandNm}, #{shopId}, #{steId},
+      #{useYn}, ... , 'PENDING'
+    )
+  </insert>
+
+  <!-- 기존 UPDATE에 sync_status 추가 -->
+  <update id="updatePartnerBrand">
+    UPDATE fscps.bs_airstar_brand SET
+      brand_nm = #{brandNm},
+      use_yn = #{useYn},
+      ... ,
+      sync_status = 'PENDING'
+    WHERE co_id = #{coId}
+      AND brand_code = #{brandCode}
+      AND shop_id = #{shopId}
+      AND ste_id = #{steId}
+  </update>
+
+  <!-- 신규: sync_status 업데이트 -->
+  <update id="updateSyncStatus">
+    UPDATE fscps.bs_airstar_brand
+    SET sync_status = #{syncStatus}
+    WHERE ste_id = #{steId}
+  </update>
+
+  <!-- 신규: FAIL 상태 건 조회 (재시도용) -->
+  <select id="selectBySyncStatus" resultType="PartnerBrandEntity">
+    SELECT *
+    FROM fscps.bs_airstar_brand
+    WHERE sync_status = #{syncStatus}
+    ORDER BY upd_dt DESC
+  </select>
+
+--------------------------------------------------------------------------------
+  Step 2: Service 분리
+--------------------------------------------------------------------------------
+
+  // ===== 1단계: DB 저장 (트랜잭션) =====
+  @Transactional
+  public SaveResult savePartnerBrandsToDb(List<PartnerBrandReqDto> list) {
+
+      List<PartnerBrandApiRegReqDto> regList = new ArrayList<>();
+      List<PartnerBrandApiRegReqDto> upList = new ArrayList<>();
+
+      for (PartnerBrandReqDto dto : list) {
+          if ("C".equals(dto.getStatus())) {
+              airstarBrandMapper.insertPartnerBrand(dto);
+              // → sync_status = 'PENDING' 으로 INSERT됨
+              regList.add(toApiDto(dto));
+          } else if ("U".equals(dto.getStatus())) {
+              airstarBrandMapper.updatePartnerBrand(dto);
+              // → sync_status = 'PENDING' 으로 UPDATE됨
+              upList.add(toApiDto(dto));
+          }
+      }
+
+      return new SaveResult(regList, upList);
+  }
+  // ← 여기서 커밋 완료. DB에 안전하게 저장됨. 커넥션 반환.
+
+
+  // ===== 2단계: API 호출 (트랜잭션 밖) =====
+  public void syncToFnbPlatform(SaveResult result) {
+
+      // 등록 API (CP204)
+      if (!result.getRegList().isEmpty()) {
+          try {
+              MiddlewareReqDto reqDto =
+                  middlewareApiManager.getInterfaceInfo("CP204");
+              reqDto.setBody(Map.of("brands", result.getRegList()));
+              ResponseEntity<?> response =
+                  middlewareApiManager.sendRequest(reqDto, responseType);
+
+              String code = getResponseCode(response);
+
+              if ("0200".equals(code)) {
+                  // 성공 → 상태 업데이트
+                  for (PartnerBrandApiRegReqDto dto : result.getRegList()) {
+                      airstarBrandMapper.updateSyncStatus(
+                          dto.getSteId(), "SUCCESS");
+                  }
+                  log.info("CP204 동기화 성공: {}건", result.getRegList().size());
+              } else {
+                  // API 응답은 왔으나 실패 코드
+                  for (PartnerBrandApiRegReqDto dto : result.getRegList()) {
+                      airstarBrandMapper.updateSyncStatus(
+                          dto.getSteId(), "FAIL");
+                  }
+                  log.warn("CP204 응답 실패 (code={}): {}건",
+                      code, result.getRegList().size());
+              }
+
+          } catch (Exception e) {
+              // 네트워크 오류, 타임아웃 등
+              log.error("CP204 API 호출 예외", e);
+              for (PartnerBrandApiRegReqDto dto : result.getRegList()) {
+                  airstarBrandMapper.updateSyncStatus(
+                      dto.getSteId(), "FAIL");
+              }
+          }
+      }
+
+      // 수정 API (CP206) - 동일한 패턴
+      if (!result.getUpList().isEmpty()) {
+          try {
+              MiddlewareReqDto reqDto =
+                  middlewareApiManager.getInterfaceInfo("CP206");
+              reqDto.setBody(Map.of("brands", result.getUpList()));
+              ResponseEntity<?> response =
+                  middlewareApiManager.sendRequest(reqDto, responseType);
+
+              String code = getResponseCode(response);
+
+              if ("0200".equals(code)) {
+                  for (PartnerBrandApiRegReqDto dto : result.getUpList()) {
+                      airstarBrandMapper.updateSyncStatus(
+                          dto.getSteId(), "SUCCESS");
+                  }
+              } else {
+                  for (PartnerBrandApiRegReqDto dto : result.getUpList()) {
+                      airstarBrandMapper.updateSyncStatus(
+                          dto.getSteId(), "FAIL");
+                  }
+              }
+          } catch (Exception e) {
+              log.error("CP206 API 호출 예외", e);
+              for (PartnerBrandApiRegReqDto dto : result.getUpList()) {
+                  airstarBrandMapper.updateSyncStatus(
+                      dto.getSteId(), "FAIL");
+              }
+          }
+      }
+  }
+
+--------------------------------------------------------------------------------
+  Step 3: Controller 조합
+--------------------------------------------------------------------------------
+
+  @PostMapping("/partner-brands-save")
+  public ResponseEntity<?> savePartenrBrands(
+      HttpServletRequest req,
+      @RequestBody List<PartnerBrandReqDto> list) throws Exception {
+
+      // 1단계: DB 저장 (트랜잭션 - 빠르게 커밋)
+      SaveResult result = airstarBrandService.savePartnerBrandsToDb(list);
+
+      // 2단계: API 호출 (트랜잭션 밖 - 실패해도 DB는 안전)
+      airstarBrandService.syncToFnbPlatform(result);
+
+      // DB는 이미 저장됨. API 결과와 무관하게 200 응답.
+      // 화면에서 sync_status 컬럼으로 동기화 상태 확인 가능.
+      return ResponseEntity.ok(
+          Map.of(
+              "message", "저장 완료",
+              "regCount", result.getRegList().size(),
+              "upCount", result.getUpList().size()
+          )
+      );
+  }
+
+--------------------------------------------------------------------------------
+  Step 4: 재시도 API (FAIL 건 수동 재처리)
+--------------------------------------------------------------------------------
+
+  // Controller
+  @PostMapping("/retry-failed-sync")
+  public ResponseEntity<?> retryFailedSync() {
+      int retried = airstarBrandService.retryFailedBrands();
+      return ResponseEntity.ok(
+          Map.of("message", "재시도 완료", "retriedCount", retried));
+  }
+
+  // Service
+  public int retryFailedBrands() {
+      List<PartnerBrandEntity> failedList =
+          airstarBrandMapper.selectBySyncStatus("FAIL");
+
+      if (failedList.isEmpty()) {
+          log.info("재시도 대상 없음");
+          return 0;
+      }
+
+      log.info("동기화 실패 건 재시도 시작: {}건", failedList.size());
+      int successCount = 0;
+
+      for (PartnerBrandEntity entity : failedList) {
+          try {
+              // 등록/수정 구분은 entity의 상태로 판단
+              String interfaceId = determineInterfaceId(entity);
+              MiddlewareReqDto reqDto =
+                  middlewareApiManager.getInterfaceInfo(interfaceId);
+              reqDto.setBody(Map.of("brands", List.of(toApiDto(entity))));
+              middlewareApiManager.sendRequest(reqDto, responseType);
+
+              airstarBrandMapper.updateSyncStatus(entity.getSteId(), "SUCCESS");
+              successCount++;
+              log.info("재시도 성공: steId={}", entity.getSteId());
+
+          } catch (Exception e) {
+              log.error("재시도 실패: steId={}", entity.getSteId(), e);
+              // FAIL 상태 유지 → 다음에 다시 시도
+          }
+      }
+
+      log.info("재시도 완료: 성공 {}건 / 전체 {}건",
+          successCount, failedList.size());
+      return successCount;
+  }
+
+--------------------------------------------------------------------------------
+  Step 5: 화면 (BO) - FAIL 건 표시 + 재시도 버튼
+--------------------------------------------------------------------------------
+
+  ※ 기존 입점사 브랜드 관리 화면에 추가:
+
+  1) 그리드 컬럼에 "동기화 상태" 추가
+     { title: '동기화', field: 'syncStatus', width: 90,
+       formatter: (cell) => {
+         const val = cell.getValue();
+         if (val === 'SUCCESS') return '<span style="color:green">✅</span>';
+         if (val === 'FAIL')    return '<span style="color:red">❌</span>';
+         if (val === 'PENDING') return '<span style="color:orange">⏳</span>';
+         return '-';
+       }
+     }
+
+  2) 재시도 버튼 (그리드 상단)
+     <button className="btn btn-gray" onClick={handleRetrySync}>
+       동기화 재시도
+     </button>
+
+  3) 재시도 핸들러
+     const handleRetrySync = async () => {
+       const confirmed = await openConfirm(
+         'FAIL 상태 건을 재동기화 하시겠습니까?');
+       if (!confirmed) return;
+       const result = await retryFailedSync();
+       openAlert(`재시도 완료: ${result.retriedCount}건`);
+       fetchList();  // 그리드 새로고침
+     };
+
+================================================================================
+  4. 장단점
+================================================================================
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  장점                                                    │
+  ├──────────────────────────────────────────────────────────┤
+  │  ✅ API 실패해도 사용자 데이터 유실 없음 (DB 유지)      │
+  │  ✅ FAIL 건을 화면에서 확인하고 재시도 가능              │
+  │  ✅ DB 커넥션 점유 시간 대폭 단축                        │
+  │  ✅ 스키마 변경 최소 (ALTER TABLE 1줄)                   │
+  │  ✅ 기존 테이블 구조를 거의 그대로 유지                  │
+  │  ✅ 운영자가 동기화 상태를 한눈에 파악 가능              │
+  └──────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  단점                                                    │
+  ├──────────────────────────────────────────────────────────┤
+  │  ❌ 비즈니스 테이블에 인프라성 컬럼(sync_status) 추가   │
+  │  ❌ 상세 실패 이력(언제, 왜 실패했는지)은 로그에만 존재 │
+  │  ❌ 각 API 연동 테이블마다 컬럼 추가 필요               │
+  │  ❌ 재시도 버튼/API 구현 필요 (API당 반나절~하루)       │
+  │  ❌ 자동 재시도(스케줄러)는 별도 구현 필요               │
+  └──────────────────────────────────────────────────────────┘
+
+================================================================================
+  5. 실패 시 흐름
+================================================================================
+
+  사용자: 저장 클릭
+       ↓
+  [DB INSERT/UPDATE + 커밋 완료]  ← sync_status = 'PENDING'
+       ↓
+  [API 호출]
+       ↓
+  ┌─────────┬──────────────────────────────────────────────┐
+  │ 성공    │ sync_status = 'SUCCESS' ✅                   │
+  │         │ → 완료. 두 DB 모두 정합성 유지               │
+  ├─────────┼──────────────────────────────────────────────┤
+  │ 실패    │ sync_status = 'FAIL' ⚠️                     │
+  │         │ → 사용자 데이터는 DB에 안전하게 보관         │
+  │         │ → 화면에서 FAIL 건 확인 가능                 │
+  │         │ → 재시도 버튼 클릭 → API 재호출              │
+  │         │ → 성공하면 'SUCCESS'로 변경                  │
+  └─────────┴──────────────────────────────────────────────┘
+
+  ※ 핵심: 사용자는 데이터를 다시 입력할 필요 없음!
+     DB에는 이미 저장되어 있고, API 동기화만 다시 하면 됨.
+
+================================================================================
+  6. 작업 범위 (API당)
+================================================================================
+
+  각 외부 API 연동 건에 대해 아래 작업이 필요:
+
+  | 작업                         | 예상 시간 |
+  |------------------------------|-----------|
+  | ALTER TABLE (컬럼 추가)      | 5분       |
+  | Mapper XML 수정              | 30분      |
+  | Service 메서드 분리          | 2시간     |
+  | Controller 수정              | 30분      |
+  | 재시도 API 구현              | 1시간     |
+  | 화면 상태 표시 + 버튼 추가   | 1시간     |
+  |------------------------------|-----------|
+  | 합계                         | 약 반나절 |
+
+  ※ 패턴이 동일하므로 첫 번째 이후에는 더 빨라짐
+
+================================================================================
+  7. 이 방식이 적합한 상황
+================================================================================
+
+  ✅ 적합:
+  - 외부 API 장애가 간헐적으로 발생 가능한 환경
+  - 사용자 데이터 유실을 허용하지 않는 경우
+  - 운영자가 화면에서 동기화 상태를 관리하고 싶은 경우
+  - 3개월 단기 프로젝트에서 적정 수준의 안전장치가 필요한 경우
+  - Kafka/Redis 같은 메시징 인프라가 없는 환경
+
+  ❌ 부적합:
+  - 상세한 실패 이력 추적이 필요한 경우 (→ 시나리오 3)
+  - 자동 재시도 + 최대 시도 횟수 관리가 필요한 경우 (→ 시나리오 3)
+  - 여러 시스템 간 복잡한 동기화가 필요한 경우

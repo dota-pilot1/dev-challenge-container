@@ -6,18 +6,18 @@
 
     <insert id="insert" parameterType="com.opro.concurrency.entity.Challenge"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO challenge (title, description, reward_product_id, status, created_at, updated_at)
-        VALUES (#{title}, #{description}, #{rewardProductId}, #{status}, NOW(), NOW())
+        INSERT INTO challenge (title, description, reward_product_id, reward_quantity, status, created_at, updated_at)
+        VALUES (#{title}, #{description}, #{rewardProductId}, #{rewardQuantity}, #{status}, NOW(), NOW())
     </insert>
 
     <select id="findAll" resultType="com.opro.concurrency.entity.Challenge">
-        SELECT id, title, description, reward_product_id, status, created_at, updated_at
+        SELECT id, title, description, reward_product_id, reward_quantity, status, created_at, updated_at
         FROM challenge
         ORDER BY created_at DESC
     </select>
 
     <select id="findById" resultType="com.opro.concurrency.entity.Challenge">
-        SELECT id, title, description, reward_product_id, status, created_at, updated_at
+        SELECT id, title, description, reward_product_id, reward_quantity, status, created_at, updated_at
         FROM challenge
         WHERE id = #{id}
     </select>

@@ -1,0 +1,2 @@
+ALTER TABLE challenge
+    ADD COLUMN reward_quantity INTEGER NOT NULL DEFAULT 1;

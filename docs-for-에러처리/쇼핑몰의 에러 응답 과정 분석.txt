@@ -1,0 +1,18 @@
+질문:
+============================================================
+/Users/terecal/concurrency-lab-container/concurrency-lab 에서 요청하는거인데 어떻게 쇼핑몰 에러가 프론트까지 넘어오는거야?
+============================================================
+
+답변:
+============================================================
+1. **프론트** → `PATCH /participations/{id}/retry-approve` → **concurrency-lab(8080)**
+2. **concurrency-lab** → `POST /orders` → **shop-api(3000)** → 재고 부족 에러 발생
+3. concurrency-lab의 `ParticipationService`에서 catch로 잡음 → **에러 메시지를 approval_history 테이블에 저장**
+4. 프론트가 재시도 결과로 `APPROVE_FAILED` 받음 → **approval_history API 조회** → 저장된 에러 메시지를 ConfirmDialog에 표시
+
+즉, shop-api 에러가 직접 프론트로 가는 게 아니라:
+
+shop-api 에러 → concurrency-lab이 catch해서 DB에 저장 → 프론트가 이력 API로 조회
+
+이 경로로 전달되는 겁니다. `ParticipationService.retryApprove()`의 catch 블록에서 `e.getMessage()`를 `errorMessage`에 넣어서 저장하는 부분이 핵심이에요.
+============================================================

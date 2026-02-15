@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    participant Admin as 관리자
+    participant CL as concurrency-lab
+    participant CL_DB as concurrency-lab DB
+    participant Shop as shop-api
+    participant Shop_DB as shop-api DB
+
+    Admin->>CL: PUT /approve (participationId=5)
+    activate CL
+    Note right of CL: @Transactional 시작
+
+    %% 1. 상태 검증
+    CL->>CL_DB: SELECT participation WHERE id=5
+    CL_DB-->>CL: status=SUBMITTED, challengeId=2
+
+    CL->>CL_DB: SELECT challenge WHERE id=2
+    CL_DB-->>CL: rewardProductId=3
+
+    %% 2. 외부 주문 요청
+    rect rgb(255, 235, 235)
+        Note over CL, Shop_DB: ★ 위험 구간: 외부 HTTP 호출 ★
+        CL->>Shop: POST /api/orders {productId:3, userId:1, qty:1}
+        activate Shop
+
+        Shop->>Shop_DB: SELECT product WHERE id=3
+        Shop_DB-->>Shop: stock=10, price=4500
+
+        Shop->>Shop_DB: UPDATE product SET stock=9
+        Shop->>Shop_DB: INSERT shop_order (status=PAID)
+        Shop_DB-->>Shop: order.id=42
+
+        Shop-->>CL: 200 OK {id:42, status:PAID}
+        deactivate Shop
+    end
+
+    %% 3. 주문 결과를 로컬 DB에 저장
+    rect rgb(235, 255, 235)
+        Note over CL, CL_DB: 주문 성공 → 로컬 DB 반영
+        CL->>CL_DB: UPDATE participation SET order_id=42
+        CL->>CL_DB: UPDATE participation SET status=APPROVED
+        CL_DB-->>CL: OK
+    end
+
+    Note right of CL: @Transactional 커밋
+    CL-->>Admin: 승인 완료 (orderId=42)
+    deactivate CL
+
+    Note over Admin, Shop_DB: ── 주문 실패 시 (catch 블록) ──
+
+    rect rgb(255, 220, 220)
+        Note over CL, Shop: shop-api 타임아웃 / 500 에러 / 네트워크 끊김
+        Note over CL, CL_DB: catch: 주문 없이 APPROVED 저장<br/>order_id = NULL ← ★ 정합성 불일치 ★
+    end

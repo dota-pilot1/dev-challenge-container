@@ -1,0 +1,47 @@
+# 브랜드 정보 조회 (Read) 로직 분석
+
+## 1. 프론트엔드 (Frontend)
+
+### 1.1 UI 이벤트
+- **위치**: `src/pages/cps/base/brandmng/BrandRtrv.jsx`
+- **트리거**: 사용자가 조회 조건 입력 후 "조회" 버튼 클릭 (`handleAirstarSearch`).
+- **상태 관리**:
+  - `handleAirstarSearch` 함수가 실행되면 API를 호출합니다.
+  - (현재 예제 코드에는 더미 데이터 세팅으로 되어 있으나, 주석에 따라 API 연동 시 `fetchBrandList`를 호출해야 함).
+
+### 1.2 API 호출
+- **위치**: `src/api/cps/base/brandmng/BrandRtrv-fetch.js`
+- **함수**: `fetchBrandList(params)`
+- **요청**: `POST /api/test/brandmng/v1.0/brandList`
+- **파라미터**: 검색 조건 (`BrandMngSearchDto`에 대응되는 JSON 객체).
+
+## 2. 백엔드 (Backend)
+
+### 2.1 Controller
+- **위치**: `com.cj.freshway.fs.test.brandmng.BrandMngController.java`
+- **메서드**: `brandList(@RequestBody BrandMngSearchDto brandMngSearchDto)`
+- **역할**: 요청 DTO를 받아 Service로 전달.
+
+### 2.2 Service
+- **위치**: `com.cj.freshway.fs.test.brandmng.BrandMngService.java`
+- **메서드**: `selectBrandList(BrandMngSearchDto brandMngSearchDto)`
+- **로직**:
+  1. Mapper를 통해 DB에서 리스트 조회.
+  2. 조회된 리스트의 크기(`count`) 계산.
+  3. `GridResponse` 객체에 데이터와 총 건수를 담아 반환.
+
+### 2.3 Mapper (DB)
+- **Interface**: `BrandMngMapper.java` -> `selectBrandList`
+- **XML**: `BrandMngMapper.xml` -> `id="selectBrandList"`
+- **SQL**:
+  ```sql
+  SELECT ROW_NUMBER() OVER (ORDER BY BRAND_ID ASC) AS ROW_NUM,
+         CO_ID, BRAND_ID, BRAND_NAME_KO, ...
+  FROM   FSCPS.TEST_BRAND_M
+  WHERE  CO_ID = #{coId}
+  AND    USE_YN = #{useYn}
+  ORDER BY BRAND_ID
+  ```
+
+## 3. 결과 반환
+- 백엔드에서 반환된 `GridResponse` (data + totalCount)는 프론트엔드의 `handleAirstarSearch` (또는 `useEffect`)에서 받아 `setAirstarList`를 통해 Grid 컴포넌트(`BrandRtrvAirstarGrid`)의 `data` prop으로 전달되어 화면에 렌더링됩니다.

@@ -18,6 +18,14 @@
         WHERE p.id = #{id}
     </select>
 
+    <select id="findByIdForUpdate" resultType="com.opro.concurrency.entity.Participation">
+        SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
+               p.order_id, p.created_at, p.updated_at
+        FROM participation p
+        WHERE p.id = #{id}
+        FOR UPDATE
+    </select>
+
     <select id="findByChallengeId" resultType="com.opro.concurrency.entity.Participation">
         SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
                p.order_id, m.nickname, p.created_at, p.updated_at

@@ -61,4 +61,9 @@ export const paymentApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(PAYMENT_API, path, {
+      method: "PATCH",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
 };

@@ -1,0 +1,69 @@
+■ 문제 4: 멱등성 키 (Idempotency Key)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▶ 무슨 문제?
+
+  승인 버튼 클릭 → shop-api에 주문 요청 → 주문 생성 성공
+  → 그런데 응답이 돌아오는 도중 네트워크 끊김
+  → concurrency-lab은 실패로 판단 → APPROVE_FAILED
+  → 재시도 버튼 클릭 → shop-api에 또 주문 요청 → 주문이 2개 생김
+
+  결과: 같은 참가에 대해 주문이 중복 생성, 재고도 2번 차감됨
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▶ 현재 코드의 문제점
+
+  1) ShopClient.createOrder() - 매번 새로운 요청으로 취급
+     → 멱등성 키 없이 POST /orders 호출
+
+  2) shop-api order.service.ts - 요청마다 무조건 새 주문 생성
+     → 중복 체크 로직 없음
+
+  3) retryApprove() - 재시도할 때도 똑같이 createOrder() 호출
+     → 이전 요청이 성공했는지 확인 불가
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▶ 해결 방법: 멱등성 키
+
+  핵심: "같은 요청이면 같은 결과를 돌려줘라"
+
+  흐름:
+  1) concurrency-lab이 주문 요청 시 고유 키를 함께 전송
+     - 키 = "participation-{participationId}" (참가 ID당 1개)
+
+  2) shop-api가 주문 생성 전에 해당 키로 이미 주문이 있는지 확인
+     - 있으면 → 기존 주문 반환 (새로 만들지 않음)
+     - 없으면 → 새 주문 생성
+
+  결과: 재시도해도 주문은 1개만 생김
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▶ 구현 계획
+
+  [shop-api 수정]
+  1. orders 테이블에 idempotency_key 컬럼 추가 (UNIQUE)
+  2. CreateOrderDto에 idempotencyKey 필드 추가
+  3. order.service.ts의 create()에서:
+     - idempotencyKey로 기존 주문 조회
+     - 있으면 → 기존 주문 반환
+     - 없으면 → 새 주문 생성 (idempotencyKey 저장)
+
+  [concurrency-lab 수정]
+  4. ShopClient.createOrder()에 idempotencyKey 파라미터 추가
+  5. ParticipationService.approve()에서:
+     - idempotencyKey = "participation-" + participationId
+     - shopClient.createOrder(..., idempotencyKey) 호출
+  6. retryApprove()도 동일한 키로 호출
+     - 같은 키이므로 이전에 성공한 주문이 있으면 그걸 반환
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+▶ 검증 시나리오
+
+  1. 승인 → 성공 → 같은 참가에 재시도 → 기존 주문 반환 (중복 없음)
+  2. 승인 → 네트워크 실패 → 재시도 → 주문 1개만 존재
+  3. 다른 참가 승인 → 다른 키 → 새 주문 정상 생성

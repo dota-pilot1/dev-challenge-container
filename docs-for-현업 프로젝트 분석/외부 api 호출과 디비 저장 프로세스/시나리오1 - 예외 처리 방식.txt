@@ -1,0 +1,259 @@
+================================================================================
+  시나리오 1: 예외 처리 방식 (트랜잭션 분리 + 즉시 재시도)
+================================================================================
+
+  난이도: ★☆☆☆☆ (하)
+  스키마 변경: 없음
+  추가 개발: Service 메서드 분리 + try-catch 재시도 루프
+
+================================================================================
+  1. 개요
+================================================================================
+
+  현재 @Transactional 안에서 외부 API를 호출하는 구조를 분리하되,
+  별도의 컬럼이나 테이블 추가 없이 예외 처리만으로 대응하는 방식.
+
+  핵심 아이디어:
+  - DB 저장과 API 호출을 분리 (트랜잭션 밖에서 API 호출)
+  - API 실패 시 즉시 2~3회 재시도
+  - 최종 실패 시 DB도 롤백 (프로그래밍 방식)
+  - 실패 이력은 서버 로그에만 기록
+
+================================================================================
+  2. 핵심 변경점
+================================================================================
+
+  변경 전 (현재):
+  ┌──────────────────────────────────┐
+  │  @Transactional                  │
+  │  public void save() {            │
+  │    DB INSERT/UPDATE              │
+  │    외부 API 호출  ← 같은 트랜잭션│
+  │  }                               │
+  └──────────────────────────────────┘
+
+  변경 후:
+  ┌──────────────────────────────────┐
+  │  @Transactional                  │
+  │  public SaveResult saveToDb() {  │
+  │    DB INSERT/UPDATE              │
+  │  } ← 커밋 완료                   │
+  │                                  │
+  │  // 트랜잭션 밖                  │
+  │  public void callApi() {         │
+  │    for (int i = 0; i < 3; i++) { │
+  │      try {                       │
+  │        API 호출                  │
+  │        성공 → break              │
+  │      } catch (Exception e) {     │
+  │        실패 → 재시도 or 롤백     │
+  │      }                           │
+  │    }                             │
+  │  }                               │
+  └──────────────────────────────────┘
+
+  ※ 가장 중요한 변경: @Transactional 범위에서 외부 API 호출을 빼는 것
+    → DB 커넥션 점유 시간: ~1초 이상 → ~50ms로 단축
+
+================================================================================
+  3. 구현 코드 예시
+================================================================================
+
+  // ===== Service: DB 저장 (트랜잭션) =====
+  @Transactional
+  public SaveResult savePartnerBrandsToDb(List<PartnerBrandReqDto> list) {
+      List<PartnerBrandApiRegReqDto> regList = new ArrayList<>();
+      List<PartnerBrandApiRegReqDto> upList = new ArrayList<>();
+
+      for (PartnerBrandReqDto dto : list) {
+          if ("C".equals(dto.getStatus())) {
+              airstarBrandMapper.insertPartnerBrand(dto);
+              regList.add(toApiDto(dto));
+          } else if ("U".equals(dto.getStatus())) {
+              airstarBrandMapper.updatePartnerBrand(dto);
+              upList.add(toApiDto(dto));
+          }
+      }
+
+      return new SaveResult(regList, upList);
+  }
+
+
+  // ===== Service: API 호출 + 즉시 재시도 (트랜잭션 밖) =====
+  private static final int MAX_RETRY = 3;
+
+  public boolean syncToFnbPlatformWithRetry(SaveResult result) {
+      boolean allSuccess = true;
+
+      // 등록 API (CP204)
+      if (!result.getRegList().isEmpty()) {
+          boolean success = callApiWithRetry("CP204", result.getRegList());
+          if (!success) allSuccess = false;
+      }
+
+      // 수정 API (CP206)
+      if (!result.getUpList().isEmpty()) {
+          boolean success = callApiWithRetry("CP206", result.getUpList());
+          if (!success) allSuccess = false;
+      }
+
+      return allSuccess;
+  }
+
+  private boolean callApiWithRetry(String interfaceId, List<?> dataList) {
+      for (int attempt = 1; attempt <= MAX_RETRY; attempt++) {
+          try {
+              MiddlewareReqDto reqDto =
+                  middlewareApiManager.getInterfaceInfo(interfaceId);
+              reqDto.setBody(Map.of("brands", dataList));
+              ResponseEntity<?> response =
+                  middlewareApiManager.sendRequest(reqDto, responseType);
+
+              // 응답 코드 확인
+              if ("0200".equals(getResponseCode(response))) {
+                  log.info("{} API 호출 성공 ({}회차)", interfaceId, attempt);
+                  return true;
+              } else {
+                  log.warn("{} API 응답 실패 ({}회차): {}",
+                      interfaceId, attempt, getResponseCode(response));
+              }
+          } catch (Exception e) {
+              log.error("{} API 호출 예외 ({}회차): {}",
+                  interfaceId, attempt, e.getMessage());
+          }
+
+          // 재시도 전 잠시 대기 (선택사항)
+          if (attempt < MAX_RETRY) {
+              try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+          }
+      }
+
+      log.error("{} API 최종 실패 ({}회 재시도 모두 실패)", interfaceId, MAX_RETRY);
+      return false;
+  }
+
+
+  // ===== Controller: 조합 =====
+  @PostMapping("/partner-brands-save")
+  public ResponseEntity<?> savePartenrBrands(
+      HttpServletRequest req,
+      @RequestBody List<PartnerBrandReqDto> list) throws Exception {
+
+      // 1단계: DB 저장 (트랜잭션 - 빠르게 커밋)
+      SaveResult result = airstarBrandService.savePartnerBrandsToDb(list);
+
+      // 2단계: API 호출 + 재시도 (트랜잭션 밖)
+      boolean success = airstarBrandService.syncToFnbPlatformWithRetry(result);
+
+      if (!success) {
+          // 3단계: 최종 실패 시 DB 롤백 (수동)
+          airstarBrandService.rollbackSavedBrands(result);
+
+          return ResponseEntity.status(500)
+              .body("API 동기화 실패. 저장이 취소되었습니다. 다시 시도해주세요.");
+      }
+
+      return ResponseEntity.ok("저장 완료");
+  }
+
+
+  // ===== Service: 롤백 처리 =====
+  @Transactional
+  public void rollbackSavedBrands(SaveResult result) {
+      // 방금 INSERT한 건 → DELETE
+      for (PartnerBrandApiRegReqDto dto : result.getRegList()) {
+          airstarBrandMapper.deletePartnerBrand(dto.getBrandMid());
+      }
+
+      // 방금 UPDATE한 건 → 이전 값으로 복원 (또는 별도 처리)
+      // ※ UPDATE 롤백은 이전 값을 알아야 하므로 복잡함
+      //   → SaveResult에 이전 값도 보관하거나, UPDATE는 롤백 안 하는 방식
+      log.warn("DB 롤백 완료: 등록 {}건 삭제", result.getRegList().size());
+  }
+
+================================================================================
+  4. 장단점
+================================================================================
+
+  ┌──────────────────────────────────────────────────────┐
+  │  장점                                                │
+  ├──────────────────────────────────────────────────────┤
+  │  ✅ 스키마 변경 없음 (ALTER TABLE, CREATE TABLE 불필요)│
+  │  ✅ 개발량 최소 (Service 분리 + try-catch만 추가)    │
+  │  ✅ DB 커넥션 점유 시간 대폭 단축 (핵심 개선)        │
+  │  ✅ 일시적 네트워크 오류는 자동 재시도로 커버         │
+  │  ✅ 모든 API 연동에 빠르게 적용 가능                 │
+  └──────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────┐
+  │  단점                                                │
+  ├──────────────────────────────────────────────────────┤
+  │  ❌ 3회 모두 실패하면 → DB 롤백 → 사용자 데이터 유실 │
+  │  ❌ 실패 이력이 서버 로그에만 남음 (화면 조회 불가)  │
+  │  ❌ 수동 재시도 불가 (사용자가 처음부터 다시 입력)   │
+  │  ❌ UPDATE 롤백이 복잡 (이전 값 보관 필요)           │
+  │  ❌ FNB+ 서버가 장시간 다운이면 계속 실패 반복       │
+  └──────────────────────────────────────────────────────┘
+
+================================================================================
+  5. 실패 시 흐름
+================================================================================
+
+  사용자: 저장 클릭
+       ↓
+  [DB INSERT/UPDATE + 커밋 완료]
+       ↓
+  [API 호출 1회차] → 실패
+       ↓
+  [API 호출 2회차] → 실패
+       ↓
+  [API 호출 3회차] → 실패
+       ↓
+  [DB 롤백 (DELETE)]  ← 방금 저장한 건 삭제
+       ↓
+  사용자에게 에러 응답: "동기화 실패. 다시 시도해주세요."
+       ↓
+  사용자: 다시 입력해서 저장 클릭... 😤
+
+  ※ 현재 구조와의 차이:
+  - 현재: API 실패 → @Transactional 자동 롤백 → 1번만 시도
+  - 개선: API 실패 → 3번 재시도 → 그래도 실패 시 수동 롤백
+  - 결과적으로 사용자 경험은 비슷 (데이터 유실)
+
+================================================================================
+  6. 한계점 및 주의사항
+================================================================================
+
+  1) "롤백"이 완벽하지 않을 수 있음
+     - INSERT → DELETE는 가능
+     - UPDATE → 이전 값으로 복원은 이전 값을 미리 저장해야 함
+     - 이전 값 보관을 위해 SaveResult에 before/after 모두 담아야 함
+
+  2) 롤백 자체가 실패할 수 있음
+     - DB 롤백 시 네트워크 오류가 나면?
+     - 결국 "DB에는 있지만 FNB+에는 없는" 불일치 상태 발생 가능
+
+  3) 응답 시간 증가
+     - 재시도 3회 × 대기 1초 = 최대 3초 추가 대기
+     - 사용자 입장에서 "로딩이 길다" 느낌
+
+  4) 본질적 한계
+     - 이 방식은 결국 "최종 실패 = 데이터 유실"
+     - FNB+ 서버가 장시간 장애 시 아무것도 저장 못하는 상태 지속
+     - 시나리오 2(컬럼 추가)가 해결하는 "나중에 재시도" 기능이 없음
+
+================================================================================
+  7. 이 방식이 적합한 상황
+================================================================================
+
+  ✅ 적합:
+  - 외부 API 장애가 극히 드문 경우
+  - 실패 시 사용자가 다시 입력하는 것이 부담 없는 경우
+  - 스키마 변경이 절대 불가능한 경우
+  - 빠르게 최소한의 개선만 하고 싶은 경우
+
+  ❌ 부적합:
+  - 외부 API 장애가 간헐적으로 발생하는 환경
+  - 사용자 입력 데이터가 복잡하고 재입력 부담이 큰 경우
+  - 운영팀이 실패 건을 화면에서 관리하고 싶은 경우
+  - 데이터 정합성이 비즈니스 핵심인 경우
