@@ -97,18 +97,58 @@ public class ParticipationService {
             );
 
             Integer orderId = ((Number) order.get("id")).intValue();
-            participationMapper.updateOrderId(id, orderId);
-            participationMapper.updateStatus(id, "APPROVED");
 
-            // 이력: 성공 기록
-            approvalHistoryMapper.insert(
-                ApprovalHistory.builder()
-                    .participationId(id)
-                    .action("APPROVE_REQUEST")
-                    .status("SUCCESS")
-                    .orderId(orderId)
-                    .build()
-            );
+            // 후속 처리: 주문 성공 후 내부 DB 업데이트
+            // 이 부분이 실패하면 shop-api에는 주문이 존재하지만 내부 상태는 미반영 (유령 주문)
+            // → 보상 트랜잭션으로 주문을 취소하여 일관성 유지
+            try {
+                participationMapper.updateOrderId(id, orderId);
+                participationMapper.updateStatus(id, "APPROVED");
+
+                approvalHistoryMapper.insert(
+                    ApprovalHistory.builder()
+                        .participationId(id)
+                        .action("APPROVE_REQUEST")
+                        .status("SUCCESS")
+                        .orderId(orderId)
+                        .build()
+                );
+            } catch (Exception postEx) {
+                log.error(
+                    "주문 후속 처리 실패, 보상 트랜잭션 실행: participationId={}, orderId={}, error={}",
+                    id,
+                    orderId,
+                    postEx.getMessage()
+                );
+
+                // 보상 트랜잭션: shop-api 주문 취소 (재고 복구 포함)
+                try {
+                    shopClient.cancelOrder(orderId);
+                    log.info(
+                        "보상 트랜잭션 성공: orderId={} 취소 완료",
+                        orderId
+                    );
+                } catch (Exception compensateEx) {
+                    log.error(
+                        "보상 트랜잭션 실패! 수동 확인 필요: orderId={}, error={}",
+                        orderId,
+                        compensateEx.getMessage()
+                    );
+                }
+
+                participationMapper.updateStatus(id, "APPROVE_FAILED");
+                approvalHistoryMapper.insert(
+                    ApprovalHistory.builder()
+                        .participationId(id)
+                        .action("APPROVE_REQUEST")
+                        .status("FAILED")
+                        .errorMessage(
+                            "주문 생성 후 후속 처리 실패 (보상 트랜잭션 실행됨): " +
+                                postEx.getMessage()
+                        )
+                        .build()
+                );
+            }
         } catch (Exception e) {
             log.error(
                 "shop-api 주문 실패: participationId={}, error={}",
@@ -117,7 +157,6 @@ public class ParticipationService {
             );
             participationMapper.updateStatus(id, "APPROVE_FAILED");
 
-            // 이력: 실패 기록
             approvalHistoryMapper.insert(
                 ApprovalHistory.builder()
                     .participationId(id)
@@ -169,17 +208,53 @@ public class ParticipationService {
             );
 
             Integer orderId = ((Number) order.get("id")).intValue();
-            participationMapper.updateOrderId(id, orderId);
-            participationMapper.updateStatus(id, "APPROVED");
 
-            approvalHistoryMapper.insert(
-                ApprovalHistory.builder()
-                    .participationId(id)
-                    .action("APPROVE_RETRY")
-                    .status("SUCCESS")
-                    .orderId(orderId)
-                    .build()
-            );
+            try {
+                participationMapper.updateOrderId(id, orderId);
+                participationMapper.updateStatus(id, "APPROVED");
+
+                approvalHistoryMapper.insert(
+                    ApprovalHistory.builder()
+                        .participationId(id)
+                        .action("APPROVE_RETRY")
+                        .status("SUCCESS")
+                        .orderId(orderId)
+                        .build()
+                );
+            } catch (Exception postEx) {
+                log.error(
+                    "재시도 후속 처리 실패, 보상 트랜잭션 실행: participationId={}, orderId={}, error={}",
+                    id,
+                    orderId,
+                    postEx.getMessage()
+                );
+
+                try {
+                    shopClient.cancelOrder(orderId);
+                    log.info(
+                        "보상 트랜잭션 성공: orderId={} 취소 완료",
+                        orderId
+                    );
+                } catch (Exception compensateEx) {
+                    log.error(
+                        "보상 트랜잭션 실패! 수동 확인 필요: orderId={}, error={}",
+                        orderId,
+                        compensateEx.getMessage()
+                    );
+                }
+
+                approvalHistoryMapper.insert(
+                    ApprovalHistory.builder()
+                        .participationId(id)
+                        .action("APPROVE_RETRY")
+                        .status("FAILED")
+                        .errorMessage(
+                            "주문 생성 후 후속 처리 실패 (보상 트랜잭션 실행됨): " +
+                                postEx.getMessage()
+                        )
+                        .build()
+                );
+            }
         } catch (Exception e) {
             log.error(
                 "shop-api 주문 재시도 실패: participationId={}, error={}",

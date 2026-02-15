@@ -63,4 +63,25 @@ public class ShopClient {
         log.info("shop-api 주문 완료: {}", response);
         return response;
     }
+
+    /**
+     * shop-api에 주문 취소 요청 (보상 트랜잭션)
+     * 주문 생성 후 후속 처리 실패 시 호출하여 주문을 취소하고 재고를 복구한다.
+     */
+    public void cancelOrder(int orderId) {
+        log.info(
+            "shop-api 주문 취소 요청 (보상 트랜잭션): orderId={}",
+            orderId
+        );
+
+        restClient
+            .patch()
+            .uri("/orders/{id}/status", orderId)
+            .header("Content-Type", "application/json")
+            .body(Map.of("status", "CANCELLED"))
+            .retrieve()
+            .toBodilessEntity();
+
+        log.info("shop-api 주문 취소 완료: orderId={}", orderId);
+    }
 }
