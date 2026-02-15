@@ -1,0 +1,82 @@
+===== DevQuest 프로젝트 구현 현황 =====
+최종 업데이트: 2026-02-14
+
+======================================================================
+                         전체 아키텍처
+======================================================================
+
+  [프론트엔드 :5173]  Vite + shadcn/ui + TanStack
+       |
+       v
+  concurrency-lab (:8080)  -------->  payment-api (:3000)
+  회원 + 챌린지 + 포인트               상품 + 결제 + 주문
+       |                                    |
+       v                                    v
+  PostgreSQL :5434                    PostgreSQL :5435
+  (concurrency_lab)                   (payment_db)
+
+======================================================================
+                         구현 현황 요약
+======================================================================
+
+  구분                          상태        비고
+  -----------------------------------------------------------
+  [인프라]
+  concurrency-lab DB (Docker)   [완료]      PostgreSQL 16, :5434
+  payment-api DB (Docker)       [완료]      PostgreSQL 16, :5435
+
+  [concurrency-lab / Spring Boot]
+  프로젝트 기본 구조             [완료]      Spring Boot 3.5.10, Java 21
+  회원 엔티티 (Member)           [완료]      MyBatis + Flyway
+  JWT 인증 (로그인/회원가입)     [완료]      Spring Security
+  Swagger 문서                   [완료]      SpringDoc OpenAPI
+  에러 처리 구조화               [완료]      GlobalExceptionHandler
+  챌린지 CRUD                    [미구현]    다음 작업
+  포인트 잔액/이력 관리          [미구현]
+  payment-api 호출 클라이언트    [미구현]    WebClient
+  상품 교환(결제) 요청           [미구현]
+
+  [payment-api / NestJS + Drizzle]
+  프로젝트 기본 구조             [완료]      NestJS + Drizzle ORM
+  결제 처리 API                  [완료]      POST /api/payments
+  결제 조회 API                  [완료]      GET /api/payments/:id
+  주문ID 조회 API                [완료]      GET /api/payments/order/:orderId
+  환불 API                       [완료]      POST /api/payments/:id/refund
+  처리 지연 시뮬레이션           [완료]      delayMs 쿼리 파라미터
+  Swagger 문서                   [완료]      http://localhost:3000/api-docs
+  상품 관리 (등록/목록/재고)     [미구현]
+  주문 내역 관리                 [미구현]
+
+  [프론트엔드 / Vite + shadcn/ui + TanStack]
+  프로젝트 생성                  [미구현]    다음 작업
+  챌린지 화면                    [미구현]
+  포인트 대시보드                [미구현]
+  상품 목록/교환 화면            [미구현]
+  동시성 테스트 시각화           [미구현]
+
+======================================================================
+                      단계별 실습 진행 현황
+======================================================================
+
+  단계                          상태        설명
+  -----------------------------------------------------------
+  0단계: 서비스 기능 구현        [진행중]    기본 기능 완성 중
+  1단계: 문제 재현               [미착수]    동시성 문제 재현
+  2단계: 비관적 락               [미착수]    SELECT FOR UPDATE
+  3단계: 낙관적 락               [미착수]    version 컬럼 기반
+  4단계: 분산 락 (Redis)         [미착수]    Redisson 기반
+
+======================================================================
+                         실행 명령어
+======================================================================
+
+  [concurrency-lab]
+  cd concurrency-lab
+  docker-compose up -d
+  ./gradlew bootRun
+
+  [payment-api]
+  cd payment-api
+  docker-compose up -d
+  npm run db:push
+  npm run start:dev

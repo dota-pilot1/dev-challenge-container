@@ -1,0 +1,37 @@
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Java / Spring Boot
+concurrency-lab/.gradle/
+concurrency-lab/build/
+concurrency-lab/bin/
+concurrency-lab/.apt_generated
+concurrency-lab/.classpath
+concurrency-lab/.factorypath
+concurrency-lab/.project
+concurrency-lab/.settings/
+concurrency-lab/.springBeans
+concurrency-lab/.sts4-cache
+
+# Node.js / NestJS (shop-api)
+shop-api/node_modules/
+shop-api/dist/
+shop-api/.env
+
+# Node.js / Vite (devquest-web)
+devquest-web/node_modules/
+devquest-web/dist/
+devquest-web/.env
+
+# Logs
+*.log
+
+# Docker volumes
+**/pgdata/
+
+# docs (한글 폴더 - 필요시 포함)

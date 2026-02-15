@@ -1,0 +1,94 @@
+===== DevQuest - 개발자 업무 챌린지 보상 시스템 =====
+
+[서비스 개요]
+개발자가 업무 챌린지를 완료하면 보상 포인트를 받고,
+포인트로 상품(기프티콘/장비/휴가 등)을 교환하는 시스템.
+실제 서비스를 만들면서 동시성/정합성 문제를 재현하고 해결한다.
+
+---
+
+[핵심 흐름]
+  챌린지 완료 → 보상 포인트 지급 → 포인트로 상품 결제(교환)
+
+---
+
+[서비스 구성]
+
+  서버                  역할                         포트    DB
+  ---------------------------------------------------------------
+  concurrency-lab      회원 + 챌린지 + 포인트        8080   PostgreSQL :5434
+  payment-api          보상 교환(결제) 서비스         3000   PostgreSQL :5435
+  프론트엔드            대시보드                      5173   -
+
+---
+
+[concurrency-lab (Spring Boot) 기능]
+
+  기존 완료:
+  - 회원가입 / 로그인 (JWT)
+  - Spring Security + Swagger
+
+  추가 구현:
+  - 챌린지 CRUD (등록, 목록, 완료 처리)
+  - 포인트 잔액 관리 (지급, 차감, 조회)
+  - 포인트 이력 (PointTransaction)
+  - payment-api 호출 클라이언트 (WebClient)
+  - 상품 교환 요청 → payment-api 결제 → 포인트 차감
+
+[payment-api (NestJS) 기능]
+
+  기존 완료:
+  - 결제 처리 (POST /api/payments)
+  - 결제 조회 / 환불
+  - 처리 지연 시뮬레이션
+
+  추가 구현:
+  - 상품 관리 (등록, 목록, 재고)
+  - 주문 내역 관리
+
+[프론트엔드 (Vite + shadcn/ui + TanStack)]
+  - 챌린지 목록 / 완료 처리 화면
+  - 포인트 잔액 / 이력 대시보드
+  - 상품 목록 / 교환(결제) 화면
+  - 동시성 테스트 발사 버튼 + 결과 시각화
+
+---
+
+[정합성 문제 발생 지점]
+
+  1. 챌린지 동시 완료 제출 → 보상 중복 지급
+  2. 포인트로 동시 결제 → 잔액 초과 차감 (Lost Update)
+  3. 결제 성공 + 포인트 차감 실패 → 분산 트랜잭션 불일치
+  4. 인기 상품 동시 교환 → 재고 초과 차감
+
+---
+
+[단계별 실습]
+
+  0단계: 서비스 기능 구현
+    - 챌린지, 포인트, 상품, 교환 기능 완성
+    - 프론트엔드 대시보드 구현
+
+  1단계: 문제 재현
+    - 동시 요청으로 Lost Update / 중복 지급 / 재고 초과 발생
+    - 테스트: ExecutorService + CountDownLatch
+
+  2단계: 비관적 락 (Pessimistic Lock)
+    - SELECT FOR UPDATE
+
+  3단계: 낙관적 락 (Optimistic Lock)
+    - version 컬럼 기반
+
+  4단계: 분산 락 (Redis)
+    - Redisson 기반
+
+---
+
+[기술 스택]
+
+  concurrency-lab : Spring Boot 3.5 + MyBatis + PostgreSQL + JWT
+  payment-api     : NestJS + Drizzle ORM + PostgreSQL
+  프론트엔드       : Vite + React + shadcn/ui + TanStack (Router + Query)
+  인프라           : Docker Compose + AWS EC2
+  테스트           : JUnit5, ExecutorService
+  분산 락          : Redis + Redisson (4단계)

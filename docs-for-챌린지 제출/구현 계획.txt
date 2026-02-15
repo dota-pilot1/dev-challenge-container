@@ -1,0 +1,10 @@
+순서 | 내용 | 서버 |
+|------|------|------|
+| 1 | Participation 엔티티 (challengeId, userId, status) | concurrency-lab |
+| 2 | 참가 신청 API (`POST /api/participations`) | concurrency-lab |
+| 3 | 제출물 제출 API (`PATCH /api/participations/:id/submit`) | concurrency-lab |
+| 4 | 관리자 승인 API (`PATCH /api/participations/:id/approve`) | concurrency-lab |
+| 5 | 승인 시 shop-api 주문 호출 (WebClient) | concurrency-lab → shop-api |
+| 6 | 프론트: 참가/제출/심사 UI | devquest-web
+
+이정도?

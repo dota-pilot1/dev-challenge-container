@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.opro.concurrency.mapper.ParticipationMapper">
+
+    <insert id="insert" parameterType="com.opro.concurrency.entity.Participation"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO participation (challenge_id, user_id, status, created_at, updated_at)
+        VALUES (#{challengeId}, #{userId}, #{status}, NOW(), NOW())
+    </insert>
+
+    <select id="findById" resultType="com.opro.concurrency.entity.Participation">
+        SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
+               p.order_id, m.nickname, p.created_at, p.updated_at
+        FROM participation p
+        LEFT JOIN member m ON m.id = p.user_id
+        WHERE p.id = #{id}
+    </select>
+
+    <select id="findByChallengeId" resultType="com.opro.concurrency.entity.Participation">
+        SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
+               p.order_id, m.nickname, p.created_at, p.updated_at
+        FROM participation p
+        LEFT JOIN member m ON m.id = p.user_id
+        WHERE p.challenge_id = #{challengeId}
+        ORDER BY p.created_at DESC
+    </select>
+
+    <select id="findAll" resultType="com.opro.concurrency.entity.Participation">
+        SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
+               p.order_id, m.nickname, p.created_at, p.updated_at
+        FROM participation p
+        LEFT JOIN member m ON m.id = p.user_id
+        ORDER BY p.created_at DESC
+    </select>
+
+    <update id="updateStatus">
+        UPDATE participation
+        SET status = #{status}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateSubmission">
+        UPDATE participation
+        SET submission_url = #{submissionUrl}, submitted_at = NOW(),
+            status = 'SUBMITTED', updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateOrderId">
+        UPDATE participation
+        SET order_id = #{orderId}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM participation WHERE id = #{id}
+    </delete>
+
+</mapper>

@@ -1,0 +1,37 @@
+===== concurrency-lab 서버 실행 명령어 =====
+
+1. DB 실행 (Docker)
+   cd concurrency-lab
+   docker-compose up -d
+
+   - PostgreSQL 16 컨테이너가 localhost:5434 에 실행됨
+   - DB: concurrency_lab / user: app_user / pw: app_password
+
+2. Spring Boot 애플리케이션 실행
+   cd concurrency-lab
+   ./gradlew bootRun
+
+   - 기본 포트: 8080
+   - Flyway 마이그레이션 자동 적용
+
+3. 테스트 실행
+   cd concurrency-lab
+   ./gradlew test
+
+4. 빌드 (JAR 생성)
+   cd concurrency-lab
+   ./gradlew build
+
+   - 빌드 결과: build/libs/concurrency-lab-0.0.1-SNAPSHOT.jar
+
+5. JAR 직접 실행
+   java -jar build/libs/concurrency-lab-0.0.1-SNAPSHOT.jar
+
+6. Swagger UI 확인
+   http://localhost:8080/swagger-ui/index.html
+
+7. DB 중지
+   docker-compose down
+
+   볼륨까지 삭제하려면:
+   docker-compose down -v
