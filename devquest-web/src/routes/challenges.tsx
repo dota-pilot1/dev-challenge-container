@@ -27,7 +27,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/shared/ui/dialog";
 import { Card, CardContent } from "@/shared/ui/card";
 import { Input } from "@/shared/ui/input";
@@ -57,11 +56,32 @@ function ChallengesPage() {
   const queryClient = useQueryClient();
   const { user, isLoggedIn } = useAuth();
 
-  const [createOpen, setCreateOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingChallenge, setEditingChallenge] = useState<Challenge | null>(
+    null,
+  );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [rewardProductId, setRewardProductId] = useState("");
   const [rewardQuantity, setRewardQuantity] = useState("1");
+
+  const openCreateForm = () => {
+    setEditingChallenge(null);
+    setTitle("");
+    setDescription("");
+    setRewardProductId("");
+    setRewardQuantity("1");
+    setFormOpen(true);
+  };
+
+  const openEditForm = (challenge: Challenge) => {
+    setEditingChallenge(challenge);
+    setTitle(challenge.title);
+    setDescription(challenge.description || "");
+    setRewardProductId(String(challenge.rewardProductId));
+    setRewardQuantity(String(challenge.rewardQuantity));
+    setFormOpen(true);
+  };
 
   const [detailChallenge, setDetailChallenge] = useState<Challenge | null>(
     null,
@@ -125,11 +145,26 @@ function ChallengesPage() {
     mutationFn: challengesApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["challenges"] });
-      setCreateOpen(false);
-      setTitle("");
-      setDescription("");
-      setRewardProductId("");
-      setRewardQuantity("1");
+      setFormOpen(false);
+      toast.success("챌린지가 등록되었습니다");
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: Parameters<typeof challengesApi.update>[1];
+    }) => challengesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["challenges"] });
+      setFormOpen(false);
+      toast.success("챌린지가 수정되었습니다");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
     },
   });
 
@@ -194,23 +229,28 @@ function ChallengesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Challenges</h1>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>챌린지 등록</Button>
-          </DialogTrigger>
+        <Button onClick={openCreateForm}>챌린지 등록</Button>
+        <Dialog open={formOpen} onOpenChange={setFormOpen}>
           <DialogContent className="p-6">
             <DialogHeader>
-              <DialogTitle>새 챌린지 등록</DialogTitle>
+              <DialogTitle>
+                {editingChallenge ? "챌린지 수정" : "새 챌린지 등록"}
+              </DialogTitle>
             </DialogHeader>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                createMutation.mutate({
+                const data = {
                   title,
                   description: description || undefined,
                   rewardProductId: Number(rewardProductId),
                   rewardQuantity: Number(rewardQuantity),
-                });
+                };
+                if (editingChallenge) {
+                  updateMutation.mutate({ id: editingChallenge.id, data });
+                } else {
+                  createMutation.mutate(data);
+                }
               }}
               className="space-y-4"
             >
@@ -266,9 +306,15 @@ function ChallengesPage() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || updateMutation.isPending}
               >
-                {createMutation.isPending ? "등록 중..." : "등록"}
+                {editingChallenge
+                  ? updateMutation.isPending
+                    ? "수정 중..."
+                    : "수정"
+                  : createMutation.isPending
+                    ? "등록 중..."
+                    : "등록"}
               </Button>
             </form>
           </DialogContent>
@@ -288,7 +334,7 @@ function ChallengesPage() {
               <TableHead>설명</TableHead>
               <TableHead>보상 상품</TableHead>
               <TableHead className="w-16 text-center">수량</TableHead>
-              <TableHead className="w-20 text-center">상세</TableHead>
+              <TableHead className="w-32 text-center">관리</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -306,13 +352,22 @@ function ChallengesPage() {
                   {challenge.rewardQuantity}
                 </TableCell>
                 <TableCell className="text-center">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setDetailChallenge(challenge)}
-                  >
-                    상세
-                  </Button>
+                  <div className="flex items-center justify-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openEditForm(challenge)}
+                    >
+                      수정
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setDetailChallenge(challenge)}
+                    >
+                      상세
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -472,16 +527,59 @@ function ChallengesPage() {
                                     </>
                                   )}
                                   {p.status === "APPROVE_FAILED" && (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() =>
-                                        retryApproveMutation.mutate(p.id)
-                                      }
-                                      disabled={retryApproveMutation.isPending}
-                                    >
-                                      재시도
-                                    </Button>
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          retryApproveMutation.mutate(p.id)
+                                        }
+                                        disabled={
+                                          retryApproveMutation.isPending
+                                        }
+                                      >
+                                        재시도
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={async () => {
+                                          await Promise.all([
+                                            participationsApi.retryApprove(
+                                              p.id,
+                                            ),
+                                            participationsApi.retryApprove(
+                                              p.id,
+                                            ),
+                                          ]);
+                                          invalidateAll();
+                                          const updated =
+                                            await participationsApi.findByChallengeId(
+                                              detailChallenge!.id,
+                                            );
+                                          const target = updated.find(
+                                            (u) => u.id === p.id,
+                                          );
+                                          if (target?.status === "APPROVED") {
+                                            toast.success(
+                                              "더블 재시도 성공 (멱등성 키로 중복 주문 방지됨)",
+                                            );
+                                          } else if (
+                                            target?.status === "APPROVE_FAILED"
+                                          ) {
+                                            showErrorFromHistory(
+                                              p.id,
+                                              "더블 재시도 실패",
+                                            );
+                                          }
+                                        }}
+                                        disabled={
+                                          retryApproveMutation.isPending
+                                        }
+                                      >
+                                        더블 재시도
+                                      </Button>
+                                    </>
                                   )}
                                   {p.status === "SUBMITTED" && (
                                     <>

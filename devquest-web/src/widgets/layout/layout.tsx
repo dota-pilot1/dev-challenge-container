@@ -18,7 +18,7 @@ const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/challenges", label: "챌린지 관리" },
   { to: "/shop", label: "상품 관리" },
-  { to: "/orders", label: "주문 관리" },
+  { to: "/orders", label: "포상 관리" },
   { to: "/approval-history", label: "이력 관리" },
 ] as const;
 
@@ -141,7 +141,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </header>
       <Separator />
       <main className="container mx-auto px-4 py-6">{children}</main>
-      <Toaster position="top-right" richColors />
+      <Toaster position="bottom-right" richColors />
 
       {/* 로그인 / 회원가입 다이얼로그 */}
       <Dialog

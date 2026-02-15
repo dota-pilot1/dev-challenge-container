@@ -22,4 +22,14 @@
         WHERE id = #{id}
     </select>
 
+    <update id="update" parameterType="com.opro.concurrency.entity.Challenge">
+        UPDATE challenge
+        SET title = #{title},
+            description = #{description},
+            reward_product_id = #{rewardProductId},
+            reward_quantity = #{rewardQuantity},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

@@ -30,4 +30,6 @@ public interface ParticipationMapper {
     void updateOrderId(@Param("id") Long id, @Param("orderId") Integer orderId);
 
     void deleteById(@Param("id") Long id);
+
+    int countByChallengeId(@Param("challengeId") Long challengeId);
 }

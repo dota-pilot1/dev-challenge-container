@@ -39,6 +39,8 @@ export const mainApi = {
   get: <T>(path: string) => request<T>(MAIN_API, path),
   post: <T>(path: string, body: unknown) =>
     request<T>(MAIN_API, path, { method: "POST", body: JSON.stringify(body) }),
+  put: <T>(path: string, body: unknown) =>
+    request<T>(MAIN_API, path, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(MAIN_API, path, {
       method: "PATCH",

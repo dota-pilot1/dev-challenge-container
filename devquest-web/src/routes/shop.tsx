@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { productsApi, type Product } from "@/entities/product";
@@ -24,10 +25,11 @@ function ShopPage() {
   const updateStockMutation = useMutation({
     mutationFn: ({ id, stock }: { id: number; stock: number }) =>
       productsApi.updateStock(id, stock),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setEditingId(null);
       setStockValue("");
+      toast.success(`재고가 ${variables.stock}개로 변경되었습니다`);
     },
   });
 

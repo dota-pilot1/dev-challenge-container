@@ -22,6 +22,19 @@ export class OrderService {
   async create(dto: CreateOrderDto) {
     const quantity = dto.quantity ?? 1;
 
+    // 멱등성 키 체크: 이미 동일한 키로 생성된 주문이 있으면 기존 주문 반환
+    if (dto.idempotencyKey) {
+      const [existing] = await this.db
+        .select()
+        .from(orders)
+        .where(eq(orders.idempotencyKey, dto.idempotencyKey))
+        .limit(1);
+
+      if (existing) {
+        return existing;
+      }
+    }
+
     // 상품 존재 + 재고 확인
     const [product] = await this.db
       .select()
@@ -68,7 +81,9 @@ export class OrderService {
       .values({
         productId: dto.productId,
         userId: dto.userId,
+        nickname: dto.nickname ?? null,
         quantity,
+        idempotencyKey: dto.idempotencyKey ?? null,
         status: 'PAID',
       })
       .returning();

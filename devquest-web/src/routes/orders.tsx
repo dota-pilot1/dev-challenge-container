@@ -46,9 +46,9 @@ function OrdersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Orders</h1>
+      <h1 className="text-3xl font-bold">포상 관리</h1>
       <p className="text-muted-foreground">
-        주문 내역 (챌린지 완료 시 자동으로 주문이 생성됩니다)
+        포상 내역 (챌린지 승인 시 자동으로 포상이 생성됩니다)
       </p>
 
       {ordersLoading ? (
@@ -61,10 +61,10 @@ function OrdersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16">ID</TableHead>
+                <TableHead className="w-24">수상자</TableHead>
                 <TableHead>상품</TableHead>
                 <TableHead className="w-20">수량</TableHead>
                 <TableHead className="w-28">상태</TableHead>
-                <TableHead className="w-24">사용자</TableHead>
                 <TableHead className="w-44">주문일시</TableHead>
               </TableRow>
             </TableHeader>
@@ -79,13 +79,15 @@ function OrdersPage() {
                   <TableRow key={order.id}>
                     <TableCell className="font-mono">{order.id}</TableCell>
                     <TableCell>
+                      {order.nickname ?? `User ${order.userId}`}
+                    </TableCell>
+                    <TableCell>
                       {product?.name ?? `상품 #${order.productId}`}
                     </TableCell>
                     <TableCell>{order.quantity}</TableCell>
                     <TableCell>
                       <Badge variant={status.variant}>{status.label}</Badge>
                     </TableCell>
-                    <TableCell>User {order.userId}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {new Date(order.createdAt).toLocaleString("ko-KR")}
                     </TableCell>

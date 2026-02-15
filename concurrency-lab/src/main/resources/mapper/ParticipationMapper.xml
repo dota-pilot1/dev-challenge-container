@@ -66,4 +66,8 @@
         DELETE FROM participation WHERE id = #{id}
     </delete>
 
+    <select id="countByChallengeId" resultType="int">
+        SELECT COUNT(*) FROM participation WHERE challenge_id = #{challengeId}
+    </select>
+
 </mapper>

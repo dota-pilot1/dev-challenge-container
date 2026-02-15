@@ -81,12 +81,19 @@ public class ParticipationService {
             participation.getChallengeId()
         );
 
-        // shop-api에 주문 요청
+        // 닉네임 조회 (findByIdForUpdate는 JOIN 없이 행잠금만 수행)
+        Participation withNickname = findById(id);
+        String nickname = withNickname.getNickname();
+
+        // shop-api에 주문 요청 (멱등성 키: 참가 ID 기반)
+        String idempotencyKey = "participation-" + id;
         try {
             Map<String, Object> order = shopClient.createOrder(
                 challenge.getRewardProductId(),
                 participation.getUserId(),
-                challenge.getRewardQuantity()
+                challenge.getRewardQuantity(),
+                idempotencyKey,
+                nickname
             );
 
             Integer orderId = ((Number) order.get("id")).intValue();
@@ -146,11 +153,19 @@ public class ParticipationService {
             participation.getChallengeId()
         );
 
+        // 닉네임 조회
+        Participation withNickname = findById(id);
+        String nickname = withNickname.getNickname();
+
+        // 동일한 멱등성 키 사용 (이전 요청이 성공했으면 기존 주문 반환)
+        String idempotencyKey = "participation-" + id;
         try {
             Map<String, Object> order = shopClient.createOrder(
                 challenge.getRewardProductId(),
                 participation.getUserId(),
-                challenge.getRewardQuantity()
+                challenge.getRewardQuantity(),
+                idempotencyKey,
+                nickname
             );
 
             Integer orderId = ((Number) order.get("id")).intValue();
