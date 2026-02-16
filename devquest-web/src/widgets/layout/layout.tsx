@@ -20,6 +20,7 @@ const navItems = [
   { to: "/shop", label: "상품 관리" },
   { to: "/orders", label: "포상 관리" },
   { to: "/approval-history", label: "이력 관리" },
+  { to: "/concurrency-test", label: "부하 테스트" },
 ] as const;
 
 export function Layout({ children }: { children: React.ReactNode }) {
