@@ -1,0 +1,139 @@
+=====================================
+동시 승인 방지 — 관련 코드
+=====================================
+
+■ 핵심 원리
+  같은 참가자에 대해 동시에 승인 요청이 들어오면
+  SELECT ... FOR UPDATE (비관적 락)로 행을 잠가서
+  먼저 도착한 요청만 승인하고, 나머지는 거부한다.
+
+
+─────────────────────────────────────
+1. MyBatis 쿼리 — ParticipationMapper.xml
+─────────────────────────────────────
+
+<!-- 비관적 락: FOR UPDATE로 행 잠금 (JOIN 없이 단독 조회) -->
+<select id="findByIdForUpdate" resultType="com.opro.concurrency.entity.Participation">
+    SELECT p.id, p.challenge_id, p.user_id, p.status, p.submission_url, p.submitted_at,
+           p.order_id, p.created_at, p.updated_at
+    FROM participation p
+    WHERE p.id = #{id}
+    FOR UPDATE
+</select>
+
+※ PostgreSQL에서 FOR UPDATE는 LEFT JOIN의 nullable 쪽에 적용 불가
+   → JOIN 없이 participation 테이블만 조회하여 잠금 획득
+   → 닉네임 등 추가 정보는 별도 findById()로 조회
+
+
+─────────────────────────────────────
+2. 서비스 — ParticipationService.java
+─────────────────────────────────────
+
+@Transactional
+public Participation approve(Long id) {
+    // ① 비관적 락: 동시 승인 요청 시 하나만 통과하도록 행 잠금
+    Participation participation = participationMapper
+        .findByIdForUpdate(id)
+        .orElseThrow(() ->
+            new CustomException(ErrorCode.INVALID_REQUEST, "참가 정보를 찾을 수 없습니다")
+        );
+
+    // ② 상태 검증: SUBMITTED가 아니면 거부
+    //    → 먼저 잠금을 획득한 요청이 APPROVED로 변경한 뒤
+    //      뒤늦게 잠금을 획득한 요청은 여기서 걸린다
+    if (!"SUBMITTED".equals(participation.getStatus())) {
+        throw new CustomException(
+            ErrorCode.INVALID_REQUEST,
+            "제출 완료 상태에서만 승인할 수 있습니다"
+        );
+    }
+
+    Challenge challenge = challengeService.findById(participation.getChallengeId());
+
+    // ③ 닉네임 조회 (findByIdForUpdate는 JOIN 없이 잠금만 수행하므로 별도 조회)
+    Participation withNickname = findById(id);
+    String nickname = withNickname.getNickname();
+
+    // ④ shop-api에 주문 요청 (멱등성 키 포함)
+    String idempotencyKey = "participation-" + id;
+    try {
+        Map<String, Object> order = shopClient.createOrder(
+            challenge.getRewardProductId(),
+            participation.getUserId(),
+            challenge.getRewardQuantity(),
+            idempotencyKey,
+            nickname
+        );
+
+        Integer orderId = ((Number) order.get("id")).intValue();
+
+        // ⑤ 후속 처리 (실패 시 보상 트랜잭션)
+        try {
+            participationMapper.updateOrderId(id, orderId);
+            participationMapper.updateStatus(id, "APPROVED");
+            approvalHistoryMapper.insert(
+                ApprovalHistory.builder()
+                    .participationId(id).action("APPROVE_REQUEST")
+                    .status("SUCCESS").orderId(orderId).build()
+            );
+        } catch (Exception postEx) {
+            // 보상 트랜잭션: 주문 취소
+            try { shopClient.cancelOrder(orderId); }
+            catch (Exception compensateEx) {
+                log.error("보상 트랜잭션 실패! 수동 확인 필요: orderId={}", orderId);
+            }
+            participationMapper.updateStatus(id, "APPROVE_FAILED");
+        }
+    } catch (Exception e) {
+        participationMapper.updateStatus(id, "APPROVE_FAILED");
+    }
+
+    return findById(id);
+}
+
+
+─────────────────────────────────────
+3. 컨트롤러 — ParticipationController.java
+─────────────────────────────────────
+
+@PatchMapping("/{id}/approve")
+public ResponseEntity<Participation> approve(@PathVariable Long id) {
+    return ResponseEntity.ok(participationService.approve(id));
+}
+
+@PatchMapping("/{id}/retry-approve")
+public ResponseEntity<Participation> retryApprove(@PathVariable Long id) {
+    return ResponseEntity.ok(participationService.retryApprove(id));
+}
+
+
+─────────────────────────────────────
+4. 동작 흐름 요약
+─────────────────────────────────────
+
+  요청 A                PostgreSQL               요청 B
+    │                      │                       │
+    ├─ findByIdForUpdate ─→│                       │
+    │  (잠금 획득)          │                       │
+    │                      │←─ findByIdForUpdate ──┤
+    │                      │   (대기... 블로킹)      │
+    │                      │                       │
+    ├─ status=SUBMITTED ──→│                       │
+    │  → APPROVED로 변경    │                       │
+    ├─ COMMIT ────────────→│                       │
+    │  (잠금 해제)          │                       │
+    │                      │──→ 잠금 획득           │
+    │                      │   status=APPROVED     │
+    │                      │   → "제출 완료 상태에서만│
+    │                      │      승인 가능" 에러    │
+
+
+─────────────────────────────────────
+5. 핵심 포인트
+─────────────────────────────────────
+
+• FOR UPDATE는 트랜잭션이 끝날 때까지 다른 트랜잭션의 같은 행 접근을 블로킹한다
+• 낙관적 락(version 컬럼)과 달리 재시도 없이 순차 처리를 보장한다
+• PostgreSQL에서 FOR UPDATE + LEFT JOIN 불가 → 잠금 쿼리와 데이터 조회 쿼리를 분리
+• @Transactional이 있어야 FOR UPDATE 잠금이 메서드 종료까지 유지된다
