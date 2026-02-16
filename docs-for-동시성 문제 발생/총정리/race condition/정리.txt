@@ -1,0 +1,58 @@
+## Race Condition — 원자적 재고 차감
+
+### 문제
+두 명이 동시에 같은 상품을 주문하면 재고가 꼬일 수 있다.
+
+예시 (재고 1개 남은 상황):
+  요청 A: 재고 조회 → 1개 확인 → 차감 → 0개
+  요청 B: 재고 조회 → 1개 확인 → 차감 → -1개 (!)
+
+원인: "조회"와 "차감"이 별도 쿼리로 분리되어 있어서
+두 요청이 동시에 조회하면 둘 다 재고가 있다고 판단함.
+
+
+### 기존 코드 (문제 있음)
+
+  // 1. 조회
+  const product = await db.select().from(products).where(eq(products.id, id));
+
+  // 2. 검증 (이 사이에 다른 요청이 끼어들 수 있음!)
+  if (product.stock < quantity) throw new Error('재고 부족');
+
+  // 3. 차감
+  await db.update(products).set({ stock: product.stock - quantity });
+
+→ 1~3 사이에 다른 요청이 끼어들면 재고가 음수가 될 수 있음
+
+
+### 해결 코드 (원자적 재고 차감)
+
+  const [updated] = await db
+    .update(products)
+    .set({
+      stock: sql`${products.stock} - ${quantity}`,  // DB에서 직접 계산
+    })
+    .where(
+      and(
+        eq(products.id, dto.productId),
+        gte(products.stock, quantity)  // stock >= quantity 조건
+      )
+    )
+    .returning();
+
+  if (!updated) {
+    throw new BadRequestException('재고가 부족합니다');
+  }
+
+→ 하나의 UPDATE 쿼리로 "조건 확인 + 차감"을 동시에 수행
+→ DB 레벨에서 원자성 보장, 재고가 음수가 될 수 없음
+
+
+### 핵심 원리
+- WHERE 절에 stock >= quantity 조건을 넣어서 재고 부족이면 UPDATE가 0행 반환
+- SET 절에서 stock = stock - quantity로 DB가 직접 계산
+- 애플리케이션에서 조회한 값이 아니라 DB의 현재 값 기준으로 차감
+
+
+### 적용 위치
+- shop-api/src/order/order.service.ts — create() 메서드

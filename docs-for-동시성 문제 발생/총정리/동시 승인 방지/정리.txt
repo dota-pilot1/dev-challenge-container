@@ -1,0 +1,52 @@
+## 동시 승인 방지 — 비관적 락 (SELECT FOR UPDATE)
+
+### 문제
+같은 참가자에 대해 승인 요청이 동시에 2번 들어오면
+둘 다 "SUBMITTED" 상태를 확인하고 각각 승인 처리 → 주문이 2번 생성됨.
+
+예시:
+  요청 A: 상태 조회 → "SUBMITTED" → 승인 처리 → 주문 생성
+  요청 B: 상태 조회 → "SUBMITTED" → 승인 처리 → 주문 생성 (중복!)
+
+
+### 해결: SELECT ... FOR UPDATE (비관적 락)
+
+  <select id="findByIdForUpdate">
+      SELECT p.id, p.challenge_id, p.user_id, p.status, ...
+      FROM participation p
+      WHERE p.id = #{id}
+      FOR UPDATE
+  </select>
+
+FOR UPDATE가 하는 일:
+  1. 해당 행에 잠금을 건다
+  2. 다른 트랜잭션이 같은 행을 FOR UPDATE로 조회하면 대기
+  3. 먼저 잠금을 건 트랜잭션이 커밋/롤백해야 다음 트랜잭션이 진행
+
+동시 요청 시 흐름:
+  요청 A: FOR UPDATE → 잠금 획득 → "SUBMITTED" 확인 → 승인 → COMMIT → 잠금 해제
+  요청 B: FOR UPDATE → 대기... → 잠금 획득 → "APPROVED" 확인 → 거부됨 (이미 승인됨)
+
+
+### 비관적 락 vs 낙관적 락
+- 비관적 락: "충돌이 날 거다"라고 가정하고 미리 잠금 → 안전하지만 대기 발생
+- 낙관적 락: "충돌 안 날 거다"라고 가정하고 UPDATE 시점에 버전 체크 → 빠르지만 충돌 시 재시도 필요
+
+현재 프로젝트에서 비관적 락을 선택한 이유:
+  - 승인은 상태 변경 + 외부 API 호출이 포함된 중요한 작업
+  - 실패 시 재시도 비용이 높음 (주문 생성 취소 등)
+  - 동시 승인 빈도가 높지 않아 대기 시간 부담이 적음
+
+
+### 주의사항
+- FOR UPDATE는 LEFT JOIN과 함께 쓸 수 없음
+  → "FOR UPDATE cannot be applied to the nullable side of an outer join" 에러
+  → 잠금용 쿼리는 JOIN 없이, 추가 정보(닉네임 등)는 별도 쿼리로 조회
+
+- @Transactional이 있어야 FOR UPDATE가 의미 있음
+  → 트랜잭션 안에서 잠금 → 작업 → 커밋 시 잠금 해제
+
+
+### 적용 위치
+- concurrency-lab/.../mapper/ParticipationMapper.xml — findByIdForUpdate
+- concurrency-lab/.../service/ParticipationService.java — approve(), retryApprove()
