@@ -22,4 +22,27 @@
         WHERE email = #{email}
     </select>
 
+    <select id="findAll" resultType="com.opro.concurrency.entity.Member">
+        SELECT id, email, password, nickname, created_at, updated_at
+        FROM member
+        ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.opro.concurrency.entity.Member">
+        SELECT id, email, password, nickname, created_at, updated_at
+        FROM member
+        WHERE id = #{id}
+    </select>
+
+    <update id="update" parameterType="com.opro.concurrency.entity.Member">
+        UPDATE member
+        SET nickname = #{nickname}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM member
+        WHERE id = #{id}
+    </delete>
+
 </mapper>

@@ -7,10 +7,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { challengesApi, type Challenge } from "@/entities/challenge";
 import { productsApi, type Product } from "@/entities/product";
-import {
-  participationsApi,
-  type Participation,
-} from "@/entities/participation";
+import { participationsApi } from "@/entities/participation";
 import { useAuth } from "@/features/auth";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
