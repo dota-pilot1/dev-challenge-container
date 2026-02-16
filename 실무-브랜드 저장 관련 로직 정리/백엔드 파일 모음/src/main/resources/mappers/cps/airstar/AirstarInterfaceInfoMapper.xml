@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.cj.freshway.fs.cps.airstar.middleware.AirstarInterfaceInfoMapper">
+	
+	<!--
+	 * airstar api 요청 인터페이스 정보 
+	 * @author 
+	 * 
+	 -->
+	<select id="getAirstarInterfaceInfo" parameterType="string" resultType="com.cj.freshway.fs.cps.airstar.middleware.entity.MiddlewareIfReqEntity">
+		/* com.cj.freshway.fs.cps.airstar.middleware.AirstarInterfaceInfoMapper.getAirstarInterfaceInfo  [Airstar 인터페이스 정보 조회]  */
+		SELECT 
+			COMM_CD as ifId,
+			COMM_CD_NM as ifName,
+			CHARTR_REF1 as destinationMethod,
+			CHARTR_REF2 as destinationUrl,
+			CHARTR_REF3	as destinationPath		
+     	FROM 
+     		fscps.CM_CODE_M_IF
+   		WHERE COMM_CL_CD = 'FP130'
+   			AND COMM_CD = #{ifId}		   
+	</select>
+	
+	
+</mapper> 

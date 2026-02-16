@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.cj.freshway.fs.cps.airstar.brand.AirstarBrandMapper">
+	
+	<!--
+	 * airstar 플랫폼 브랜드 관리
+	 * @author 
+	 * 
+	 -->
+
+	<insert id="upsertPlatformBrand" parameterType="com.cj.freshway.fs.cps.airstar.brand.entity.PlatformBrandEntity">
+    	INSERT INTO fscps.bs_platform_brand (
+	        co_id,
+	        brand_code,
+	        standard_cat_code,
+	        brand_name_kor,
+	        brand_name_en,
+	        brand_name_jp,
+	        brand_name_zh_cn,
+	        brand_name_zh_tw,
+	        use_yn,
+	        reg_id,
+	        reg_dttm,
+	        upd_id,
+	        upd_dttm
+	    )
+	    VALUES (
+	        #{coId},
+	        #{brandCode},
+	        #{standardCatCode},
+	        COALESCE(#{brandNameKor}, '-'),
+	        #{brandNameEn},
+	        #{brandNameJp},
+	        #{brandNameZhCn},
+	        #{brandNameZhTw},
+	        'Y',
+	        'system',
+	        CURRENT_TIMESTAMP,
+	        'system',
+	        CURRENT_TIMESTAMP
+	    )
+	    ON CONFLICT (co_id, brand_code, standard_cat_code)
+	    DO UPDATE
+	    SET 
+	    brand_name_kor = COALESCE(#{brandNameKor}, '-'),
+	    brand_name_en = #{brandNameEn},
+	    brand_name_jp = #{brandNameJp},
+	    brand_name_zh_cn = #{brandNameZhCn},
+	    brand_name_zh_tw = #{brandNameZhTw},
+	    use_yn = 'Y',
+	    reg_id = 'system',
+	    reg_dttm = CURRENT_TIMESTAMP,
+	    upd_id = 'system',
+	    upd_dttm = CURRENT_TIMESTAMP
+	</insert>
+	
+		
+	<insert id="insertPartnerBrand" parameterType="com.cj.freshway.fs.cps.airstar.brand.dto.PartnerBrandReqDto">		
+    	/* com.cj.freshway.fs.cps.airstar.brand.dto.PartnerBrandReqDto [입점사 브랜드 등록]  */
+    	INSERT INTO fscps.bs_airstar_brand (
+	        co_id,
+			brand_code,
+			shop_id,
+			ste_id,
+			brand_name_kor,
+			brand_name_en,
+			brand_name_jp,
+			brand_name_zh_cn,
+			brand_name_zh_tw,
+			brand_desc,
+			use_yn,
+			reg_id,
+			reg_dttm
+	    )
+	    VALUES (
+	        #{coId},
+	        #{brandCode},
+	        #{shopId},
+	        #{steId},
+	        #{brandNameKr},
+	        #{brandNameEn},
+	        #{brandNameJp},	        
+	        #{brandNameZhCn},
+	        #{brandNameZhTw},
+	        #{brandDesc},
+	        #{useYn},
+	        #{regId},
+	        CURRENT_TIMESTAMP	        
+	    )	    
+	</insert>
+	
+	
+	<update id="updatePartnerBrand" parameterType="com.cj.freshway.fs.cps.airstar.brand.dto.PartnerBrandReqDto">		
+    	/* com.cj.freshway.fs.cps.airstar.brand.dto.PartnerBrandReqDto [입점사 브랜드 수정]  */
+    	UPDATE fscps.bs_airstar_brand 
+    	SET 
+    		brand_name_kor = #{brandNameKr},
+    		brand_name_en = #{brandNameEn},
+    		brand_name_jp = #{brandNameJp},
+    		brand_name_zh_cn = #{brandNameZhCn},
+    		brand_name_zh_tw = #{brandNameZhTw},
+    		brand_desc = #{brandDesc},
+    		use_yn = #{useYn},
+    		upd_id = #{regId},
+    		upd_dttm = CURRENT_TIMESTAMP    	
+    	WHERE co_id = #{coId}
+    		and brand_code = #{brandCode}
+    		and shop_id =  #{shopId}
+    		and ste_id = #{steId}
+	</update>
+	
+	<!--입점사 브랜드 API 조회 후 응답값에 있는 항목만 업데이트-->
+	<update id="updatePartnerBrandBatch" parameterType="com.cj.freshway.fs.cps.airstar.brand.entity.PartnerBrandEntity">		
+    	/* com.cj.freshway.fs.cps.airstar.brand.entity.PartnerBrandEntity [입점사 브랜드 수정]  */
+    	UPDATE fscps.bs_airstar_brand 
+    	SET 
+    		brand_name_kor = #{brandNameKor},
+    		brand_name_en = #{brandNameEn},
+    		brand_name_jp = #{brandNameJp},
+    		brand_name_zh_cn = #{brandNameZhCn},
+    		brand_name_zh_tw = #{brandNameZhTw},    		
+    		use_yn = #{useYn},
+    		upd_id = 'system',
+    		upd_dttm = CURRENT_TIMESTAMP    	
+    	WHERE ste_id = #{steId}
+	</update>
+	
+	
+	<!--플랫폼 브랜드 조회-->
+	<select id = "selectPlatformBrands" resultType="com.cj.freshway.fs.cps.airstar.brand.entity.PlatformBrandEntity">
+		SELECT /* com.cj.freshway.fs.cps.airstar.brand.AirstarBrandMapper.selectPlatformBrands*/
+			co_id,
+			brand_code,
+			standard_cat_code,
+			brand_name_kor,
+			brand_name_en,
+			brand_name_jp,
+			brand_name_zh_cn,
+			brand_name_zh_tw,
+			use_yn,
+			reg_id,
+			reg_dttm,
+			upd_id,
+			upd_dttm
+		FROM fscps.bs_platform_brand
+		WHERE 1 = 1 
+	</select>
+	
+	<!--입점사 브랜드 조회-->	
+	<select id = "selectPartnerBrands" resultType="com.cj.freshway.fs.cps.airstar.brand.entity.PartnerBrandEntity">
+		SELECT /* com.cj.freshway.fs.cps.airstar.brand.AirstarBrandMapper.selectPartenrBrands*/
+			co_id,
+			brand_code,
+			shop_id,
+			ste_id,
+			brand_name_kor,
+			brand_name_en,
+			brand_name_jp,
+			brand_name_zh_cn,
+			brand_name_zh_tw,
+			brand_desc,
+			use_yn,
+			reg_id,
+			reg_dttm,
+			upd_id,
+			upd_dttm
+		FROM bs_airstar_brand
+		WHERE 1 = 1 
+	</select>
+	
+</mapper> 

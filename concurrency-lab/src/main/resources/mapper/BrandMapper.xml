@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.opro.concurrency.mapper.BrandMapper">
+
+    <insert id="insert" parameterType="com.opro.concurrency.entity.Brand"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO brand (
+            brand_code, shop_id, ste_id,
+            brand_name_ko, brand_name_en, brand_name_jp,
+            brand_name_zh_cn, brand_name_zh_tw,
+            brand_desc, use_yn, sync_status, reg_id,
+            created_at, updated_at, version
+        ) VALUES (
+            #{brandCode}, #{shopId}, #{steId},
+            #{brandNameKo}, #{brandNameEn}, #{brandNameJp},
+            #{brandNameZhCn}, #{brandNameZhTw},
+            #{brandDesc}, #{useYn}, 'NONE', #{regId},
+            NOW(), NOW(), 0
+        )
+    </insert>
+
+    <update id="update" parameterType="com.opro.concurrency.entity.Brand">
+        UPDATE brand
+        SET brand_name_ko = #{brandNameKo},
+            brand_name_en = #{brandNameEn},
+            brand_name_jp = #{brandNameJp},
+            brand_name_zh_cn = #{brandNameZhCn},
+            brand_name_zh_tw = #{brandNameZhTw},
+            brand_desc = #{brandDesc},
+            use_yn = #{useYn},
+            updated_at = NOW(),
+            version = version + 1
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateWithVersion" parameterType="com.opro.concurrency.entity.Brand">
+        UPDATE brand
+        SET brand_name_ko = #{brandNameKo},
+            brand_name_en = #{brandNameEn},
+            brand_name_jp = #{brandNameJp},
+            brand_name_zh_cn = #{brandNameZhCn},
+            brand_name_zh_tw = #{brandNameZhTw},
+            brand_desc = #{brandDesc},
+            use_yn = #{useYn},
+            updated_at = NOW(),
+            version = version + 1
+        WHERE id = #{id}
+          AND version = #{version}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM brand WHERE id = #{id}
+    </delete>
+
+    <delete id="deleteAll">
+        DELETE FROM brand
+    </delete>
+
+    <select id="findAll" resultType="com.opro.concurrency.entity.Brand">
+        SELECT id, brand_code, shop_id, ste_id,
+               brand_name_ko, brand_name_en, brand_name_jp,
+               brand_name_zh_cn, brand_name_zh_tw,
+               brand_desc, use_yn, sync_status, sync_retry_count,
+               last_sync_at, last_sync_error, reg_id,
+               created_at, updated_at, version
+        FROM brand
+        ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.opro.concurrency.entity.Brand">
+        SELECT id, brand_code, shop_id, ste_id,
+               brand_name_ko, brand_name_en, brand_name_jp,
+               brand_name_zh_cn, brand_name_zh_tw,
+               brand_desc, use_yn, sync_status, sync_retry_count,
+               last_sync_at, last_sync_error, reg_id,
+               created_at, updated_at, version
+        FROM brand
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByIdForUpdate" resultType="com.opro.concurrency.entity.Brand">
+        SELECT id, brand_code, shop_id, ste_id,
+               brand_name_ko, brand_name_en, brand_name_jp,
+               brand_name_zh_cn, brand_name_zh_tw,
+               brand_desc, use_yn, sync_status, sync_retry_count,
+               last_sync_at, last_sync_error, reg_id,
+               created_at, updated_at, version
+        FROM brand
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <update id="updateSyncStatus">
+        UPDATE brand
+        SET sync_status = #{syncStatus},
+            last_sync_error = #{lastSyncError},
+            last_sync_at = NOW(),
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="incrementSyncRetryCount">
+        UPDATE brand
+        SET sync_retry_count = sync_retry_count + 1,
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <select id="findBySyncStatus" resultType="com.opro.concurrency.entity.Brand">
+        SELECT id, brand_code, shop_id, ste_id,
+               brand_name_ko, brand_name_en, brand_name_jp,
+               brand_name_zh_cn, brand_name_zh_tw,
+               brand_desc, use_yn, sync_status, sync_retry_count,
+               last_sync_at, last_sync_error, reg_id,
+               created_at, updated_at, version
+        FROM brand
+        WHERE sync_status = #{syncStatus}
+        ORDER BY id
+    </select>
+
+</mapper>

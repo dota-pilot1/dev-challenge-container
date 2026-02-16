@@ -1,0 +1,297 @@
+============================================================
+  브랜드 마스터 관리 기능 구현 계획서
+  (실무 코드 기반 → 현재 프로젝트 적용 + 동시성 문제 해결)
+============================================================
+
+■ 목적
+  실무 프로젝트(Spring Boot + MyBatis + 외부 API 연동)의 브랜드 저장 로직을
+  현재 프로젝트(concurrency-lab)의 기존 패턴에 맞춰 거의 동일하게 재현하고,
+  실무 코드에 존재하는 동시성/정합성 문제를 직접 개선해 본다.
+
+■ 실무 코드 → 현재 프로젝트 매핑 전략
+  ┌─────────────────────┬──────────────────────────┐
+  │ 실무 (Spring Boot)  │ 현재 프로젝트            │
+  ├─────────────────────┼──────────────────────────┤
+  │ AirstarBrandController  │ BrandController      │
+  │ AirstarBrandService     │ BrandService         │
+  │ AirstarBrandMapper      │ BrandMapper          │
+  │ AirstarBrandMapper.xml  │ BrandMapper.xml      │
+  │ PartnerBrandEntity      │ Brand (entity)       │
+  │ PlatformBrandEntity     │ PlatformBrand (entity)│
+  │ PartnerBrandReqDto      │ BrandSaveRequest     │
+  │ MiddlewareApiManager    │ ShopClient (기존 활용)│
+  │ 외부 Airstar API        │ shop-api (모의 연동)  │
+  │ MyBatis + PostgreSQL    │ 동일                 │
+  │ 프론트 (미포함)         │ devquest-web 추가    │
+  └─────────────────────┴──────────────────────────┘
+
+============================================================
+  PHASE 1: 백엔드 - 기본 CRUD (실무 구조 재현)
+============================================================
+
+[1-1] DB 테이블 생성 (Flyway V6)
+  파일: concurrency-lab/src/main/resources/db/migration/V6__create_brand_tables.sql
+
+  (1) platform_brand 테이블 (플랫폼 브랜드 마스터)
+      - id            BIGSERIAL PK
+      - brand_code    VARCHAR(50) NOT NULL UNIQUE
+      - brand_name_ko VARCHAR(200) NOT NULL
+      - brand_name_en VARCHAR(200)
+      - brand_name_jp VARCHAR(200)
+      - brand_name_zh_cn VARCHAR(200)
+      - brand_name_zh_tw VARCHAR(200)
+      - category_code VARCHAR(50)
+      - use_yn        VARCHAR(1) DEFAULT 'Y'
+      - created_at    TIMESTAMP DEFAULT NOW()
+      - updated_at    TIMESTAMP DEFAULT NOW()
+
+  (2) brand 테이블 (입점사 브랜드 = 핵심 관리 대상)
+      - id            BIGSERIAL PK
+      - brand_code    VARCHAR(50) NOT NULL  (FK → platform_brand)
+      - shop_id       VARCHAR(50) NOT NULL
+      - ste_id        VARCHAR(50) NOT NULL  (= brandMid, 사이트 식별자)
+      - brand_name_ko VARCHAR(200) NOT NULL
+      - brand_name_en VARCHAR(200)
+      - brand_name_jp VARCHAR(200)
+      - brand_name_zh_cn VARCHAR(200)
+      - brand_name_zh_tw VARCHAR(200)
+      - brand_desc    TEXT
+      - use_yn        VARCHAR(1) DEFAULT 'Y'
+      - sync_status   VARCHAR(20) DEFAULT 'NONE'
+                       -- NONE / PENDING / SUCCESS / FAILED
+      - sync_retry_count INT DEFAULT 0
+      - last_sync_at     TIMESTAMP
+      - last_sync_error  TEXT
+      - reg_id        VARCHAR(50)
+      - created_at    TIMESTAMP DEFAULT NOW()
+      - updated_at    TIMESTAMP DEFAULT NOW()
+      - version       INTEGER DEFAULT 0  ← 낙관적 락용
+      - UNIQUE (brand_code, shop_id, ste_id)
+
+[1-2] Entity 클래스
+  (1) concurrency-lab/.../entity/PlatformBrand.java
+      - 위 테이블 1:1 매핑, @Data @Builder
+
+  (2) concurrency-lab/.../entity/Brand.java
+      - 위 테이블 1:1 매핑, @Data @Builder
+      - sync_status, version 등 포함
+
+[1-3] DTO 클래스
+  파일: concurrency-lab/.../dto/
+
+  (1) BrandSaveRequest.java
+      - List<BrandRow> rows
+      - BrandRow: id, brandCode, shopId, steId,
+                  brandNameKo/En/Jp/ZhCn/ZhTw, brandDesc, useYn, status(C/U/D)
+
+  (2) BrandSyncResult.java (외부 연동 결과 응답용)
+      - totalCount, successCount, failedCount
+      - List<BrandSyncDetail> details
+
+[1-4] Mapper 인터페이스 + XML
+  (1) BrandMapper.java
+      - insert(Brand)
+      - update(Brand)
+      - deleteById(Long)
+      - findAll() → List<Brand>
+      - findById(Long) → Optional<Brand>
+      - findByIdForUpdate(Long) → Optional<Brand>  ← 비관적 락
+      - updateSyncStatus(id, syncStatus, syncError)
+      - incrementSyncRetryCount(Long id)
+      - findBySyncStatus(String status) → List<Brand>
+      - updateWithVersion(Brand) → int  ← 낙관적 락 (WHERE version = ?)
+
+  (2) PlatformBrandMapper.java
+      - upsert(PlatformBrand) ← ON CONFLICT DO UPDATE
+      - findAll() → List<PlatformBrand>
+
+  (3) BrandMapper.xml / PlatformBrandMapper.xml
+      - 실무 코드의 SQL 패턴 거의 동일하게 작성
+      - findByIdForUpdate: SELECT ... FOR UPDATE
+      - updateWithVersion: WHERE id = #{id} AND version = #{version}
+
+[1-5] Service
+  (1) BrandService.java
+      - findAll(): 브랜드 목록 조회
+      - saveAll(BrandSaveRequest): 일괄 저장 (C/U/D)
+        → 실무와 동일하게 status 기반 분기
+        → 저장 시 sync_status = 'PENDING' 세팅
+      - syncBrands(List<Long> brandIds): 외부 연동 수행
+        → shop-api 호출 → 성공/실패에 따라 sync_status 업데이트
+      - retrySyncFailed(): FAILED 상태 건 재시도
+      - findBySyncStatus(String): 상태별 조회
+
+  (2) PlatformBrandService.java
+      - findAll(): 플랫폼 브랜드 조회
+      - syncFromExternal(): shop-api에서 상품 목록 가져와 upsert (모의)
+
+[1-6] Controller
+  (1) BrandController.java (@RequestMapping("/api/brands"))
+      - GET  /                    → 전체 조회
+      - POST /save                → 일괄 저장 (C/U/D)
+      - POST /sync                → 저장 후 외부 연동 (PENDING 건 대상)
+      - POST /retry-sync          → 실패 건 재시도
+      - GET  /sync-status/{status} → 상태별 필터 조회
+
+  (2) PlatformBrandController.java (@RequestMapping("/api/platform-brands"))
+      - GET  /                    → 전체 조회
+      - POST /sync                → 외부 동기화
+
+[1-7] SecurityConfig 수정
+  - /api/brands/** permitAll 추가
+  - /api/platform-brands/** permitAll 추가
+
+[1-8] ErrorCode 추가
+  - BRAND_NOT_FOUND(HttpStatus.NOT_FOUND, "BRAND_404", "브랜드를 찾을 수 없습니다")
+  - BRAND_DUPLICATE(HttpStatus.CONFLICT, "BRAND_409", "이미 등록된 브랜드입니다")
+  - BRAND_SYNC_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "BRAND_500_SYNC", "외부 연동에 실패했습니다")
+  - BRAND_VERSION_CONFLICT(HttpStatus.CONFLICT, "BRAND_409_VERSION", "다른 사용자가 먼저 수정했습니다")
+
+============================================================
+  PHASE 2: 외부 연동 모의 (shop-api 활용)
+============================================================
+
+실무에서는 MiddlewareApiManager → 중계서버 → Airstar API 순서로 호출하지만,
+현재 프로젝트에서는 이미 존재하는 shop-api를 "외부 시스템"으로 활용한다.
+
+[2-1] 외부 연동 시나리오 설계
+  - 브랜드 저장(C/U) → shop-api에 상품 생성/수정 API 호출로 모의
+  - 성공: sync_status = SUCCESS, last_sync_at 갱신
+  - 실패: sync_status = FAILED, last_sync_error 기록, sync_retry_count++
+  - 타임아웃: FAILED 처리 후 재시도 가능
+
+[2-2] ShopClient 확장 (또는 BrandSyncClient 별도 생성)
+  - 기존 ShopClient 패턴과 동일하게 RestClient 사용
+  - createProduct / updateProduct 호출을 브랜드 연동으로 활용
+
+[2-3] 트랜잭션 분리 (실무 코드 개선 포인트)
+  실무 코드 문제: @Transactional 안에서 DB 저장 + 외부 API 호출 동시 수행
+  개선 방안:
+    (1) saveAll() → DB 저장 + sync_status=PENDING (트랜잭션 커밋)
+    (2) syncBrands() → 커밋 이후 외부 호출 (별도 메서드/이벤트)
+    (3) 실패 시 sync_status=FAILED만 업데이트 (보상 트랜잭션 불필요)
+
+============================================================
+  PHASE 3: 동시성 문제 해결
+============================================================
+
+[3-1] 시나리오 A - 비관적 락 (Pessimistic Lock)
+  이미 프로젝트에 participation에서 사용 중인 패턴 활용.
+  - findByIdForUpdate(): SELECT ... FOR UPDATE
+  - 동일 brand를 동시에 수정하려는 요청 중 하나만 통과
+  - 사용처: syncBrands()에서 연동 직전 행 잠금
+
+[3-2] 시나리오 B - 낙관적 락 (Optimistic Lock)
+  - brand 테이블의 version 컬럼 활용
+  - UPDATE ... SET version = version + 1 WHERE id = ? AND version = ?
+  - 영향 행수가 0이면 → BRAND_VERSION_CONFLICT 예외 발생
+  - 사용처: saveAll()의 U(수정) 처리 시
+
+[3-3] 시나리오 C - UPSERT + UNIQUE 제약 (중복 방지)
+  - 실무 코드의 ON CONFLICT (brand_code, shop_id, ste_id) 패턴 그대로 적용
+  - 플랫폼 브랜드 동기화 시 upsert 활용
+
+[3-4] 시나리오 D - 멱등성 키 (Idempotency Key)
+  - 이미 shop-api 주문에서 사용 중인 패턴
+  - 브랜드 연동 시에도 "brand-sync-{brandId}" 형태의 멱등성 키 사용
+  - 동일 요청 재전송 시 중복 처리 방지
+
+[3-5] 부하 테스트 (기존 concurrency-test 페이지 참고)
+  - 동일 brandId에 대해 동시 N건 저장 요청 → 결과 관찰
+  - 동시 연동 요청 → FOR UPDATE 효과 확인
+  - version 충돌 → 프론트에서 충돌 메시지 표시
+
+============================================================
+  PHASE 4: 프론트엔드 (devquest-web)
+============================================================
+
+[4-1] entities/brand 추가
+  (1) model.ts
+      - Brand, PlatformBrand, BrandRow, BrandSaveRequest 타입 정의
+  (2) api/brand-api.ts
+      - findAll, save, sync, retrySync, findBySyncStatus
+  (3) index.ts - re-export
+
+[4-2] 라우트 추가
+  (1) routes/brands.tsx → 브랜드 마스터 관리 페이지
+      - Tabulator 그리드 (members.tsx 패턴 그대로 활용)
+      - 컬럼: ID, 브랜드코드, 점포ID, 사이트ID, 브랜드명(한/영), 사용여부, 연동상태, 상태
+      - 버튼: 신규 / 삭제 / 저장 / 외부연동 / 실패건 재시도
+      - sync_status에 따른 배지(PENDING=노랑, SUCCESS=초록, FAILED=빨강)
+
+[4-3] 레이아웃 네비게이션 추가
+  - layout.tsx의 navItems에 { to: "/brands", label: "브랜드 관리" } 추가
+
+[4-4] 동시성 테스트 UI (선택)
+  - concurrency-test 페이지에 브랜드 동시 저장 테스트 섹션 추가
+  - "동일 브랜드 N건 동시 수정" 버튼
+  - 결과 표시: 성공/실패/충돌 건수
+
+============================================================
+  구현 순서 (추천)
+============================================================
+
+  Step 1. DB 마이그레이션 (V6) + Entity + DTO
+  Step 2. Mapper + XML (CRUD + FOR UPDATE + version 기반 update)
+  Step 3. Service (saveAll + 기본 CRUD)
+  Step 4. Controller + SecurityConfig 수정
+  Step 5. 프론트엔드 (entity + api + 라우트 + 네비 추가)
+  Step 6. 기본 동작 확인 (신규/수정/삭제/조회)
+  Step 7. 외부 연동 로직 (sync_status 상태 관리)
+  Step 8. 동시성 처리 (비관적 락 + 낙관적 락)
+  Step 9. 프론트엔드 연동 상태 표시 + 재시도 버튼
+  Step 10. 부하 테스트로 동시성 검증
+
+============================================================
+  파일 생성/수정 목록 정리
+============================================================
+
+  [신규 생성 - 백엔드]
+  1.  db/migration/V6__create_brand_tables.sql
+  2.  entity/Brand.java
+  3.  entity/PlatformBrand.java
+  4.  dto/BrandSaveRequest.java
+  5.  dto/BrandSyncResult.java
+  6.  mapper/BrandMapper.java
+  7.  mapper/PlatformBrandMapper.java
+  8.  resources/mapper/BrandMapper.xml
+  9.  resources/mapper/PlatformBrandMapper.xml
+  10. service/BrandService.java
+  11. service/PlatformBrandService.java
+  12. controller/BrandController.java
+  13. controller/PlatformBrandController.java
+
+  [수정 - 백엔드]
+  14. config/SecurityConfig.java  → /api/brands/**, /api/platform-brands/** permitAll
+  15. exception/ErrorCode.java    → BRAND 관련 에러코드 추가
+
+  [신규 생성 - 프론트엔드]
+  16. entities/brand/model.ts
+  17. entities/brand/api/brand-api.ts
+  18. entities/brand/index.ts
+  19. routes/brands.tsx
+
+  [수정 - 프론트엔드]
+  20. widgets/layout/layout.tsx   → 네비게이션에 "브랜드 관리" 추가
+
+============================================================
+  핵심 동시성 학습 포인트 요약
+============================================================
+
+  1. 비관적 락 (FOR UPDATE)
+     → 동시 연동 요청 직렬화, 이미 participation에서 검증된 패턴
+
+  2. 낙관적 락 (version 컬럼)
+     → 그리드 수정 시 다른 사용자 동시 수정 감지, 충돌 시 재조회 유도
+
+  3. 트랜잭션 경계 분리
+     → 실무 코드(DB+외부 호출 같은 TX) 문제를 개선
+     → DB 커밋 후 외부 호출, sync_status로 상태 관리
+
+  4. 멱등성 키
+     → 외부 연동 재시도 시 중복 반영 방지
+
+  5. UPSERT + UNIQUE 제약
+     → 플랫폼 브랜드 동기화 시 중복 삽입 방지
+
+============================================================

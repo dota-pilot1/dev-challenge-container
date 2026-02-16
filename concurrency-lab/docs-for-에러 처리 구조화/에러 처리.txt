@@ -1,0 +1,7 @@
+Controller에서 예외 터짐
+        ↓
+GlobalExceptionHandler가 낚아챔
+        ↓
+ErrorCode(enum)에서 코드/메시지 꺼냄
+        ↓
+ErrorResponse(DTO)로 통일된 JSON 응답

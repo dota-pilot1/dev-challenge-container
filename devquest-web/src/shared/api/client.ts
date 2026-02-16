@@ -63,6 +63,12 @@ export const paymentApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  delete: async (path: string) => {
+    const res = await fetch(`${PAYMENT_API}${path}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  },
   patch: <T>(path: string, body?: unknown) =>
     request<T>(PAYMENT_API, path, {
       method: "PATCH",

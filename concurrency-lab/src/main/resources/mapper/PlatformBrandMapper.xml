@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.opro.concurrency.mapper.PlatformBrandMapper">
+
+    <insert id="upsert" parameterType="com.opro.concurrency.entity.PlatformBrand">
+        INSERT INTO platform_brand (
+            brand_code, brand_name_ko, brand_name_en, brand_name_jp,
+            brand_name_zh_cn, brand_name_zh_tw,
+            category_code, use_yn,
+            created_at, updated_at
+        ) VALUES (
+            #{brandCode}, #{brandNameKo}, #{brandNameEn}, #{brandNameJp},
+            #{brandNameZhCn}, #{brandNameZhTw},
+            #{categoryCode}, COALESCE(#{useYn}, 'Y'),
+            NOW(), NOW()
+        )
+        ON CONFLICT (brand_code)
+        DO UPDATE SET
+            brand_name_ko = EXCLUDED.brand_name_ko,
+            brand_name_en = EXCLUDED.brand_name_en,
+            brand_name_jp = EXCLUDED.brand_name_jp,
+            brand_name_zh_cn = EXCLUDED.brand_name_zh_cn,
+            brand_name_zh_tw = EXCLUDED.brand_name_zh_tw,
+            category_code = EXCLUDED.category_code,
+            use_yn = EXCLUDED.use_yn,
+            updated_at = NOW()
+    </insert>
+
+    <select id="findAll" resultType="com.opro.concurrency.entity.PlatformBrand">
+        SELECT id, brand_code, brand_name_ko, brand_name_en, brand_name_jp,
+               brand_name_zh_cn, brand_name_zh_tw,
+               category_code, use_yn,
+               created_at, updated_at
+        FROM platform_brand
+        ORDER BY id
+    </select>
+
+</mapper>

@@ -48,3 +48,20 @@ export const orders = pgTable('shop_order', {
 
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
+
+// ===== Platform Brand (외부 플랫폼 브랜드) =====
+export const platformBrands = pgTable('platform_brand', {
+  id: serial('id').primaryKey(),
+  brandCode: varchar('brand_code', { length: 50 }).notNull().unique(),
+  shopId: varchar('shop_id', { length: 50 }),
+  brandMid: varchar('brand_mid', { length: 50 }),
+  brandNameKo: varchar('brand_name_ko', { length: 200 }).notNull(),
+  brandNameEn: varchar('brand_name_en', { length: 200 }),
+  brandDesc: varchar('brand_desc', { length: 500 }),
+  useYn: varchar('use_yn', { length: 1 }).default('Y').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type PlatformBrand = typeof platformBrands.$inferSelect;
+export type NewPlatformBrand = typeof platformBrands.$inferInsert;

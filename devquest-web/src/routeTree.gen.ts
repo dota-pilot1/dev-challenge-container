@@ -14,6 +14,8 @@ import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as MembersRouteImport } from './routes/members'
 import { Route as ConcurrencyTestRouteImport } from './routes/concurrency-test'
 import { Route as ChallengesRouteImport } from './routes/challenges'
+import { Route as BrandsExternalRouteImport } from './routes/brands-external'
+import { Route as BrandsRouteImport } from './routes/brands'
 import { Route as ApprovalHistoryRouteImport } from './routes/approval-history'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -42,6 +44,16 @@ const ChallengesRoute = ChallengesRouteImport.update({
   path: '/challenges',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BrandsExternalRoute = BrandsExternalRouteImport.update({
+  id: '/brands-external',
+  path: '/brands-external',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BrandsRoute = BrandsRouteImport.update({
+  id: '/brands',
+  path: '/brands',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApprovalHistoryRoute = ApprovalHistoryRouteImport.update({
   id: '/approval-history',
   path: '/approval-history',
@@ -56,6 +68,8 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brands': typeof BrandsRoute
+  '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/members': typeof MembersRoute
@@ -65,6 +79,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brands': typeof BrandsRoute
+  '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/members': typeof MembersRoute
@@ -75,6 +91,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brands': typeof BrandsRoute
+  '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
   '/concurrency-test': typeof ConcurrencyTestRoute
   '/members': typeof MembersRoute
@@ -86,6 +104,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/approval-history'
+    | '/brands'
+    | '/brands-external'
     | '/challenges'
     | '/concurrency-test'
     | '/members'
@@ -95,6 +115,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/approval-history'
+    | '/brands'
+    | '/brands-external'
     | '/challenges'
     | '/concurrency-test'
     | '/members'
@@ -104,6 +126,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/approval-history'
+    | '/brands'
+    | '/brands-external'
     | '/challenges'
     | '/concurrency-test'
     | '/members'
@@ -114,6 +138,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApprovalHistoryRoute: typeof ApprovalHistoryRoute
+  BrandsRoute: typeof BrandsRoute
+  BrandsExternalRoute: typeof BrandsExternalRoute
   ChallengesRoute: typeof ChallengesRoute
   ConcurrencyTestRoute: typeof ConcurrencyTestRoute
   MembersRoute: typeof MembersRoute
@@ -158,6 +184,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChallengesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/brands-external': {
+      id: '/brands-external'
+      path: '/brands-external'
+      fullPath: '/brands-external'
+      preLoaderRoute: typeof BrandsExternalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/brands': {
+      id: '/brands'
+      path: '/brands'
+      fullPath: '/brands'
+      preLoaderRoute: typeof BrandsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/approval-history': {
       id: '/approval-history'
       path: '/approval-history'
@@ -178,6 +218,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApprovalHistoryRoute: ApprovalHistoryRoute,
+  BrandsRoute: BrandsRoute,
+  BrandsExternalRoute: BrandsExternalRoute,
   ChallengesRoute: ChallengesRoute,
   ConcurrencyTestRoute: ConcurrencyTestRoute,
   MembersRoute: MembersRoute,

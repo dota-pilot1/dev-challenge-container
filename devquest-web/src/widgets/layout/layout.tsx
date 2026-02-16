@@ -13,6 +13,7 @@ import {
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Toaster } from "@/components/ui/sonner";
+import { CommonDropdownMenu } from "@/shared/ui/common-dropdown-menu";
 
 const navItems = [
   { to: "/", label: "Dashboard" },
@@ -22,6 +23,11 @@ const navItems = [
   { to: "/approval-history", label: "이력 관리" },
   { to: "/members", label: "유저 관리" },
   { to: "/concurrency-test", label: "부하 테스트" },
+] as const;
+
+const brandSubItems = [
+  { to: "/brands", label: "메인 서버" },
+  { to: "/brands-external", label: "외부 서버" },
 ] as const;
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -97,6 +103,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <Link to={item.to}>{item.label}</Link>
               </Button>
             ))}
+            <CommonDropdownMenu
+              label="브랜드 관리"
+              items={brandSubItems}
+              isActive={currentPath.startsWith("/brands")}
+            />
           </nav>
 
           <div className="flex items-center gap-2">
