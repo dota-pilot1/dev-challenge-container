@@ -1,0 +1,139 @@
+=====================================
+챌린지 제출 — 테이블 ERD 관계
+=====================================
+
+■ 전체 테이블 관계도
+
+  concurrency-lab DB                          shop-api DB
+  ┌──────────────────────────────────┐       ┌────────────────────────────┐
+  │                                  │       │                            │
+  │  member (1) ──── (N) participation (1) ──── (1) shop_order (N) ──── (1) product │
+  │                       │          │       │                            │
+  │                       │          │       └────────────────────────────┘
+  │                  (N) approval_history    │
+  │                       │          │
+  │  challenge (1) ─── (N) participation     │
+  │                                  │
+  └──────────────────────────────────┘
+
+  ※ participation.order_id → shop_order.id (서비스 간 참조, FK 아님)
+  ※ challenge.reward_product_id → product.id (서비스 간 참조, FK 아님)
+
+
+■ 테이블 상세
+
+─────────────────────────────────────
+1. member (회원)
+─────────────────────────────────────
+  id          BIGSERIAL  PK
+  email       VARCHAR    NOT NULL, UNIQUE
+  password    VARCHAR    NOT NULL
+  nickname    VARCHAR    NOT NULL
+  created_at  TIMESTAMP
+  updated_at  TIMESTAMP
+
+  관계: member (1) → participation (N)  [user_id]
+
+
+─────────────────────────────────────
+2. challenge (챌린지)
+─────────────────────────────────────
+  id                 BIGSERIAL  PK
+  title              VARCHAR    NOT NULL
+  description        TEXT
+  reward_product_id  INTEGER    NOT NULL  → product.id (shop-api)
+  reward_quantity    INTEGER    NOT NULL  DEFAULT 1
+  status             VARCHAR    DEFAULT 'ACTIVE'
+  created_at         TIMESTAMP
+  updated_at         TIMESTAMP
+
+  관계: challenge (1) → participation (N)  [challenge_id]
+
+
+─────────────────────────────────────
+3. participation (참가)
+─────────────────────────────────────
+  id              BIGSERIAL  PK
+  challenge_id    BIGINT     NOT NULL  FK → challenge.id
+  user_id         BIGINT     NOT NULL  → member.id
+  status          VARCHAR    DEFAULT 'APPLIED'
+  submission_url  VARCHAR    제출물 URL
+  submitted_at    TIMESTAMP  제출 시각
+  order_id        INTEGER    → shop_order.id (shop-api)
+  created_at      TIMESTAMP
+  updated_at      TIMESTAMP
+
+  UNIQUE (challenge_id, user_id)  — 한 챌린지에 같은 사용자 1번만 참가
+
+  관계:
+    challenge (1) → participation (N)
+    member (1) → participation (N)
+    participation (1) → approval_history (N)
+    participation (1) → shop_order (1)  [order_id, 서비스 간 참조]
+
+  status 값:
+    APPLIED → SUBMITTED → APPROVED / APPROVE_FAILED / REJECTED
+
+
+─────────────────────────────────────
+4. approval_history (승인 이력)
+─────────────────────────────────────
+  id                BIGSERIAL  PK
+  participation_id  BIGINT     NOT NULL  FK → participation.id
+  action            VARCHAR    APPROVE_REQUEST / APPROVE_RETRY
+  status            VARCHAR    SUCCESS / FAILED
+  order_id          INTEGER    성공 시 주문 ID
+  error_message     TEXT       실패 사유
+  created_at        TIMESTAMP
+
+  관계: participation (1) → approval_history (N)
+
+
+─────────────────────────────────────
+5. product (상품) — shop-api DB
+─────────────────────────────────────
+  id          SERIAL     PK
+  name        VARCHAR    NOT NULL
+  description TEXT
+  price       NUMERIC    NOT NULL
+  stock       INTEGER    DEFAULT 0
+  image_url   VARCHAR
+  created_at  TIMESTAMP
+  updated_at  TIMESTAMP
+
+  관계: product (1) → shop_order (N)  [product_id]
+
+
+─────────────────────────────────────
+6. shop_order (주문) — shop-api DB
+─────────────────────────────────────
+  id              SERIAL     PK
+  product_id      INTEGER    NOT NULL  FK → product.id
+  user_id         INTEGER    NOT NULL
+  nickname        VARCHAR    수상자 닉네임
+  quantity        INTEGER    DEFAULT 1
+  idempotency_key VARCHAR    멱등성 키 (UNIQUE)
+  status          VARCHAR    DEFAULT 'PENDING'
+  created_at      TIMESTAMP
+  updated_at      TIMESTAMP
+
+  관계: product (1) → shop_order (N)
+
+  status 값:
+    PENDING → PAID → PREPARING → SHIPPED → DELIVERED
+                                         → CANCELLED (취소 시 재고 복구)
+
+
+■ 서비스 간 참조 (FK가 아닌 논리적 참조)
+
+  1. participation.order_id → shop_order.id
+     - 승인 성공 시 shop-api에서 생성된 주문 ID를 저장
+     - 서비스가 분리되어 있어 DB 레벨 FK는 없음
+
+  2. challenge.reward_product_id → product.id
+     - 챌린지의 보상 상품이 shop-api의 어떤 상품인지 참조
+     - 마찬가지로 논리적 참조만 존재
+
+  3. participation.user_id → member.id
+     - LEFT JOIN으로 닉네임 조회
+     - shop_order.user_id에도 동일 값 전달

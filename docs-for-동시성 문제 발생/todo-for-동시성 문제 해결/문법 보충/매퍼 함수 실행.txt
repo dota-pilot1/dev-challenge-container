@@ -1,8 +1,0 @@
-        approvalHistoryMapper.insert(ApprovalHistory.builder()
-            .participationId(id)
-            .action("APPROVE_REQUEST")
-            .status("SUCCESS")
-            .orderId(orderId)
-            .build())
-
-===============================================================

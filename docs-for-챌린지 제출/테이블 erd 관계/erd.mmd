@@ -1,0 +1,59 @@
+erDiagram
+    member ||--o{ participation : "참가"
+    challenge ||--o{ participation : "소속"
+    participation ||--o{ approval_history : "이력"
+    participation ||--o| shop_order : "주문 (서비스 간 참조)"
+    product ||--o{ shop_order : "상품"
+    challenge }o--|| product : "보상 상품 (서비스 간 참조)"
+
+    member {
+        bigserial id PK
+        varchar email UK
+        varchar password
+        varchar nickname
+    }
+
+    challenge {
+        bigserial id PK
+        varchar title
+        text description
+        integer reward_product_id "→ product.id"
+        integer reward_quantity
+        varchar status "ACTIVE"
+    }
+
+    participation {
+        bigserial id PK
+        bigint challenge_id FK
+        bigint user_id "→ member.id"
+        varchar status "APPLIED → SUBMITTED → APPROVED"
+        varchar submission_url
+        timestamp submitted_at
+        integer order_id "→ shop_order.id"
+    }
+
+    approval_history {
+        bigserial id PK
+        bigint participation_id FK
+        varchar action "APPROVE_REQUEST / APPROVE_RETRY"
+        varchar status "SUCCESS / FAILED"
+        integer order_id
+        text error_message
+    }
+
+    product {
+        serial id PK
+        varchar name
+        numeric price
+        integer stock
+    }
+
+    shop_order {
+        serial id PK
+        integer product_id FK
+        integer user_id
+        varchar nickname
+        integer quantity
+        varchar idempotency_key UK
+        varchar status "PAID / CANCELLED"
+    }

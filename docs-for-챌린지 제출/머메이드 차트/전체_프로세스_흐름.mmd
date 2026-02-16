@@ -1,0 +1,40 @@
+sequenceDiagram
+    participant 사용자
+    participant 관리자
+    participant Web as devquest-web
+    participant Spring as concurrency-lab
+    participant Shop as shop-api
+
+    Note over 관리자,Shop: Phase 1 — 챌린지 생성
+    관리자->>Web: 챌린지 등록 (제목, 보상 상품, 수량)
+    Web->>Spring: POST /api/challenges
+    Spring-->>Web: 챌린지 생성 완료
+
+    Note over 사용자,Shop: Phase 2 — 참가 신청
+    사용자->>Web: 참가 신청
+    Web->>Spring: POST /api/participations
+    Spring-->>Web: 상태: APPLIED
+
+    Note over 사용자,Shop: Phase 3 — 과제 제출
+    사용자->>Web: 제출물 URL 입력
+    Web->>Spring: PATCH /api/participations/{id}/submit
+    Spring-->>Web: 상태: SUBMITTED
+
+    Note over 관리자,Shop: Phase 4 — 승인 처리
+    관리자->>Web: 승인 버튼 클릭
+    Web->>Spring: PATCH /api/participations/{id}/approve
+
+    Spring->>Spring: FOR UPDATE 잠금 + 상태 검증
+    Spring->>Shop: POST /api/orders (멱등성 키 포함)
+    Shop->>Shop: 멱등성 키 확인 → 재고 차감 → 주문 생성
+    Shop-->>Spring: 주문 ID 반환
+
+    alt 후속 처리 성공
+        Spring->>Spring: 주문 ID 저장 + APPROVED + 이력(SUCCESS)
+        Spring-->>Web: 승인 완료
+    else 후속 처리 실패
+        Spring->>Shop: 보상 트랜잭션 — 주문 취소
+        Shop->>Shop: 재고 복구 + CANCELLED
+        Spring->>Spring: APPROVE_FAILED + 이력(FAILED)
+        Spring-->>Web: 승인 실패
+    end

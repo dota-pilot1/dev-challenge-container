@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> APPLIED : 참가 신청
+
+    APPLIED --> SUBMITTED : 과제 제출 (URL 입력)
+    APPLIED --> [*] : 참가 취소 (삭제)
+
+    SUBMITTED --> APPROVED : 승인 성공 (주문 생성됨)
+    SUBMITTED --> APPROVE_FAILED : 승인 실패 (주문 실패 또는 후속 처리 실패)
+    SUBMITTED --> REJECTED : 반려
+
+    APPROVE_FAILED --> APPROVED : 재시도 성공
+    APPROVE_FAILED --> APPROVE_FAILED : 재시도 실패 (무한 재시도 가능)
+
+    APPROVED --> [*]
+    REJECTED --> [*]

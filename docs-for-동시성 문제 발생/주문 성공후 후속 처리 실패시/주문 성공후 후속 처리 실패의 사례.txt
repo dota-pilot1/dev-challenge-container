@@ -1,9 +1,0 @@
-/Users/terecal/concurrency-lab-container/docs-for-동시성 문제 발생/주문 성공후 후속 처리 실패시/주문 성공후 후속 처리 실패의 사례.txt
-
-1. shopClient.createOrder() → 주문 생성 (shop-api)
-2. participationMapper.updateOrderId() → 주문 ID 저장
-3. participationMapper.updateStatus("APPROVED") → 상태 변경
-
-만약 1번은 성공했는데 2~3번에서 DB 에러가 나면? → 주문은 생성됐지만 참가 상태는 안 바뀜 → **유령 주문** 발생
-
-Saga는 이때 주문을 취소(보상)하는 거고, 이력은 "이런 일이 있었다"를 기록하는 거라서 둘 다 필
