@@ -3,7 +3,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant B as 요청 B
 
-    Note over A,B: 같은 참가자(id=3)에 동시 승인 요청
+    Note over A,B: 같은 챌린지 참가(id=3)에 동시 승인 요청
 
     A->>DB: SELECT ... WHERE id=3 FOR UPDATE
     activate DB
