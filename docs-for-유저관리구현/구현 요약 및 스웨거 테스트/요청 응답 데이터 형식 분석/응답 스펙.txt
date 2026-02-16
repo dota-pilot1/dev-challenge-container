@@ -1,0 +1,79 @@
+응답 스펙
+=========
+
+
+1. GET /api/members — 정상 응답
+================================
+  HTTP 200 OK
+  Content-Type: application/json
+
+  [
+    {
+      "id"        : Long       — 회원 PK (auto increment)
+      "email"     : String     — 이메일 (unique)
+      "nickname"  : String     — 닉네임
+      "createdAt" : DateTime   — 가입일 (ISO 8601, ex: "2026-02-14T10:28:43.658871")
+      "updatedAt" : DateTime   — 수정일
+    }
+  ]
+
+  * password 필드는 @JsonIgnore로 응답에서 제외됨
+  * 결과가 없으면 빈 배열 [] 반환
+
+
+2. POST /api/members/save — 정상 응답
+======================================
+  HTTP 200 OK
+  Content-Type: application/json
+
+  {
+    "message": "저장되었습니다"
+  }
+
+
+3. 에러 응답 형식 (공통)
+=========================
+  모든 에러는 GlobalExceptionHandler에서 통일된 형식으로 반환된다.
+
+  {
+    "code"      : String     — 에러 코드 (ex: "USER_409", "USER_404")
+    "message"   : String     — 에러 메시지
+    "status"    : int        — HTTP 상태 코드
+    "path"      : String     — 요청 경로
+    "timestamp" : DateTime   — 발생 시간
+  }
+
+
+[에러 코드 목록 (유저 관리 관련)]
+
+  코드          | HTTP | 메시지                        | 발생 조건
+  --------------|------|-------------------------------|----------------------------------
+  USER_409      | 409  | 이미 등록된 이메일입니다       | C 요청 시 email 중복
+  USER_404      | 404  | 사용자를 찾을 수 없습니다      | U/D 요청 시 id가 존재하지 않음
+  COMMON_400    | 400  | 잘못된 요청입니다              | 필수 필드 누락 등
+
+
+[에러 응답 예시]
+
+  (1) 중복 이메일 — 409 Conflict
+  {
+    "code": "USER_409",
+    "message": "이미 등록된 이메일입니다",
+    "status": 409,
+    "path": "/api/members/save",
+    "timestamp": "2026-02-16T16:50:00.000000"
+  }
+
+  (2) 존재하지 않는 유저 — 404 Not Found
+  {
+    "code": "USER_404",
+    "message": "사용자를 찾을 수 없습니다",
+    "status": 404,
+    "path": "/api/members/save",
+    "timestamp": "2026-02-16T16:50:00.000000"
+  }
+
+  (3) 트랜잭션 롤백
+  → rows에 정상 C 1건 + 존재하지 않는 id로 U 1건 전송 시
+  → U에서 404 에러 발생 → C도 롤백되어 신규 유저가 생성되지 않음
+  → @Transactional에 의해 전체 rows가 원자적으로 처리됨

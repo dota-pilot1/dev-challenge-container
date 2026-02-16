@@ -1,0 +1,89 @@
+그리드 출력 방식
+=================
+
+
+1. 데이터 조회 → 그리드 렌더링 흐름
+=====================================
+
+  [페이지 진입]
+    → useQuery로 GET /api/members 호출
+    → 서버 응답 (Member 배열):
+      [
+        { "id": 1, "email": "test@test.com", "nickname": "test", "createdAt": "2026-02-14T10:28:43.658871" },
+        { "id": 2, "email": "terecal2@daum.net", "nickname": "hyunseok2", "createdAt": "2026-02-14T10:43:34.163544" }
+      ]
+
+    → 프론트에서 RowData로 변환:
+      [
+        { id: 1, email: "test@test.com", nickname: "test", createdAt: "2026. 2. 14." },
+        { id: 2, email: "terecal2@daum.net", nickname: "hyunseok2", createdAt: "2026. 2. 14." }
+      ]
+
+    → Tabulator에 data로 전달 → 그리드 렌더링
+
+
+2. 응답 필드 → 그리드 컬럼 매핑
+=================================
+
+  응답 필드     → 그리드 컬럼    | 편집 | 설명
+  --------------|----------------|------|----------------------------------
+  (없음)        → 체크박스       | X    | 행 선택용 (삭제 시 사용)
+  id            → ID             | X    | 신규 행이면 "NEW" 표시 (formatter)
+  email         → 이메일         | O    | editor: "input", 셀 클릭 시 편집
+  nickname      → 닉네임         | O    | editor: "input", 셀 클릭 시 편집
+  createdAt     → 가입일         | X    | toLocaleDateString("ko-KR") 변환
+  (없음)        → 상태           | X    | _flag 값에 따라 "신규"/"수정" 표시
+
+  * password — @JsonIgnore로 응답에 포함되지 않으므로 그리드에 없음
+  * updatedAt — 응답에 포함되지만 그리드에는 표시하지 않음
+
+
+3. 날짜 변환
+==============
+
+  서버 응답: "2026-02-14T10:28:43.658871"  (ISO 8601)
+      ↓
+  new Date(createdAt).toLocaleDateString("ko-KR")
+      ↓
+  그리드 표시: "2026. 2. 14."
+
+
+4. 상태 컬럼 표시 로직
+========================
+
+  _flag 값    | 표시               | 발생 시점
+  ------------|--------------------|-----------------------------------------
+  없음 (null) | (빈칸)             | 서버에서 조회된 원본 상태
+  "C"         | 초록색 "신규"      | 신규 버튼 클릭 시 addRow(_flag: "C")
+  "U"         | 파란색 "수정"      | 기존 행의 셀을 편집하면 cellEdited에서 자동 부여
+  "D"         | (행 자체 제거)     | 체크 후 삭제 버튼 → 그리드에서 row.delete()
+
+  * D는 그리드에서 행이 사라지고, deletedRows 배열에 보관됨
+  * 저장 시 changedRows(C/U) + deletedRows(D) 합쳐서 서버 전송
+
+
+5. ID 컬럼 표시 로직
+=====================
+
+  행 상태       | ID 컬럼 표시
+  --------------|------------------
+  기존 행       | 숫자 (1, 2, 3...)
+  신규 행 (C)   | "NEW" (이탤릭)
+
+  formatter에서 _flag === "C"이면 "<em>NEW</em>" 반환
+
+
+6. 저장 후 그리드 갱신
+========================
+
+  저장 버튼 클릭
+    → POST /api/members/save 호출
+    → 성공 시:
+       1. changedRows 초기화 (new Map())
+       2. deletedRows 초기화 ([])
+       3. queryClient.invalidateQueries(["members"])
+       4. useQuery가 GET /api/members 재호출
+       5. members 데이터 변경 → useEffect 재실행
+       6. Tabulator 인스턴스 destroy → 새 데이터로 재생성
+       7. 모든 _flag 초기화 (서버 데이터에는 _flag 없음)
+    → toast.success("저장되었습니다")

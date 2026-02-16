@@ -1,0 +1,78 @@
+유저 관리 구현 프로세스 요약
+============================
+
+1. 전체 구조
+-----------
+현업 백오피스/ERP 시스템의 정석 패턴을 그대로 적용했다.
+Tabulator 그리드에서 직접 셀 편집 → 변경된 행만 수집 → 일괄 저장(C/U/D 분기 처리)
+
+
+2. 데이터 흐름
+--------------
+[그리드 조회]
+  GET /api/members → MemberController.findAll() → MemberService.findAll() → MemberMapper.findAll()
+  → 전체 회원 목록을 그리드에 렌더링
+
+[일괄 저장]
+  프론트에서 변경된 행만 수집 (changedRows + deletedRows)
+  → POST /api/members/save { rows: [{id, email, nickname, status}] }
+  → MemberController.saveAll() → MemberService.saveAll()
+  → status 분기:
+     C(Create) → existsByEmail 중복 체크 → insert
+     U(Update) → findById 존재 확인 → update (nickname만)
+     D(Delete) → findById 존재 확인 → deleteById
+  → 전체 @Transactional (하나라도 실패하면 전체 롤백)
+
+
+3. 백엔드 구현 파일
+-------------------
+(1) MemberMapper.java / MemberMapper.xml
+    - 기존: insert, findByEmail, existsByEmail
+    - 추가: findAll, findById, update, deleteById
+
+(2) MemberSaveRequest.java (DTO)
+    - rows: List<MemberRow>
+    - MemberRow: { id, email, nickname, status(C/U/D) }
+
+(3) MemberService.java
+    - findAll(): 전체 회원 조회
+    - saveAll(): rows 반복 → status별 분기 처리 (@Transactional)
+
+(4) MemberController.java
+    - GET  /api/members      → findAll()
+    - POST /api/members/save  → saveAll()
+
+
+4. 프론트엔드 구현 파일
+-----------------------
+(1) member entity (model.ts, member-api.ts, index.ts)
+    - Member 타입, MemberRow/MemberSaveRequest 타입 정의
+    - membersApi: findAll(), save()
+
+(2) members.tsx (Tabulator 그리드 페이지)
+    - useRef로 Tabulator 인스턴스 직접 바인딩 (React 19 호환)
+    - 컬럼: 체크박스, ID, 이메일(편집 가능), 닉네임(편집 가능), 가입일, 상태
+    - cellEdited 이벤트 → _flag 자동 부여 (기존 행: U)
+    - 신규 버튼 → addRow(_flag: "C"), ID 컬럼에 "NEW" 표시
+    - 삭제 버튼 → 선택된 행 제거, 기존 행은 deletedRows에 D 플래그로 보관
+    - 저장 버튼 → changedRows(C/U) + deletedRows(D)만 수집 → POST /save
+    - 상태 컬럼: C → 초록색 "신규", U → 파란색 "수정"
+
+(3) layout.tsx
+    - navItems에 { to: "/members", label: "유저 관리" } 추가
+
+
+5. 핵심 포인트
+--------------
+- 변경된 행만 전송: 100건 중 3건 수정하면 3건만 서버로 전송
+- 일괄 트랜잭션: @Transactional로 C/U/D 전체를 하나의 트랜잭션으로 묶음
+- _flag 기반 상태 관리: 프론트에서 C/U/D 플래그를 관리하고 서버는 분기 처리만
+- 다이얼로그 없이 셀 직접 편집: 현업 ERP/백오피스의 표준 UX 패턴
+
+
+6. 추가 처리 사항
+-----------------
+- SecurityConfig: /api/members/** permitAll 추가 (인증 없이 접근 가능)
+- Member.java: password 필드에 @JsonIgnore 추가 (API 응답에서 비밀번호 제외)
+- 빈 응답 수정: POST /save의 ResponseEntity.ok().build() → Map.of("message", "저장되었습니다")
+  (프론트 fetch API가 항상 res.json()을 호출하므로 JSON body 필수)
