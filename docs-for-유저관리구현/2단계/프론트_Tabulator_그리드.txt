@@ -1,0 +1,158 @@
+=====================================
+2단계 — 프론트엔드 Tabulator 그리드 구현
+=====================================
+
+■ 목표
+현업 Tabulator 그리드 패턴을 적용하여 유저 관리 페이지를 구성한다.
+조회 → 그리드 표시 → 셀 편집 → 신규/삭제 → 일괄 저장
+
+
+■ 구현 내용
+
+─────────────────────────────────────
+1. Tabulator 설치
+─────────────────────────────────────
+
+  npm install react-tabulator tabulator-tables
+  (또는 CDN으로 tabulator-tables만 사용하고 ref로 직접 제어)
+
+
+─────────────────────────────────────
+2. 라우트 추가
+─────────────────────────────────────
+
+  devquest-web/src/routes/members.tsx — 신규 페이지
+  layout.tsx — navItems에 { to: "/members", label: "유저 관리" } 추가
+
+
+─────────────────────────────────────
+3. API 레이어
+─────────────────────────────────────
+
+  devquest-web/src/entities/member/api/member-api.ts
+
+  export const membersApi = {
+    findAll: () => mainApi.get<Member[]>("/members"),
+    saveAll: (list: MemberSaveRequest[]) =>
+      mainApi.post("/members/save", list),
+  };
+
+
+─────────────────────────────────────
+4. 그리드 컬럼 정의 (현업 패턴)
+─────────────────────────────────────
+
+  const columns = [
+    {
+      formatter: "rowSelection",     // 체크박스 (삭제용 선택)
+      titleFormatter: "rowSelection",
+      width: 40,
+      hozAlign: "center",
+      headerSort: false,
+    },
+    {
+      title: "ID",
+      field: "id",
+      width: 60,
+      hozAlign: "center",
+      sorter: "number",
+    },
+    {
+      title: "이메일",
+      field: "email",
+      width: 200,
+      sorter: "string",
+      // 신규 행에서만 편집 가능, 기존 행은 읽기 전용
+      editable: (cell) => cell.getRow().getData()._flag === "I",
+      editor: "input",
+    },
+    {
+      title: "닉네임",
+      field: "nickname",
+      width: 150,
+      editor: "input",              // 더블클릭으로 편집
+      sorter: "string",
+    },
+    {
+      title: "가입일",
+      field: "createdAt",
+      width: 150,
+      hozAlign: "center",
+      sorter: "datetime",
+    },
+  ];
+
+
+─────────────────────────────────────
+5. 버튼 + 상태 관리 (현업 패턴)
+─────────────────────────────────────
+
+  ■ 조회 버튼
+    → membersApi.findAll() 호출
+    → 결과를 그리드에 setData()
+    → 각 행에 _flag 없음 (원본 상태)
+
+  ■ 신규 버튼
+    → 그리드 상단에 빈 행 추가
+    → _flag: "I" 설정
+    → 이메일, 닉네임 편집 가능
+
+  ■ 삭제 버튼
+    → 선택된 행에 _flag: "D" 설정
+    → 행 스타일 변경 (취소선 등)
+    → 또는 그리드에서 즉시 제거
+
+  ■ 저장 버튼
+    → 변경된 행만 수집 (_flag가 있는 행)
+    → _flag → status 변환:
+        "I" → "C" (Create)
+        "U" → "U" (Update)
+        "D" → "D" (Delete)
+    → membersApi.saveAll(list) 호출
+    → 성공 시 toast + 재조회
+
+  ■ 셀 편집 시
+    → cellEdited 이벤트 감지
+    → 기존 행이면 _flag: "U" 설정
+    → 이미 "I"면 유지
+
+
+─────────────────────────────────────
+6. 현업 패턴과의 대응
+─────────────────────────────────────
+
+  현업                          이 프로젝트
+  ─────────────────────────────────────────
+  BrandRtrv.jsx                members.tsx
+  BrandRtrvAirstarGrid.jsx     members.tsx (통합, 작은 규모)
+  BrandRtrv-fetch.js           member-api.ts
+  SimpleTabulator              react-tabulator 또는 직접 Tabulator
+  handleAirstarSearch()        handleSearch()
+  handleAirstarNew()           handleNew()
+  handleAirstarSave()          handleSave()
+  _flag: I/U/D                 동일
+  Axios POST                   fetch (mainApi.post)
+
+
+─────────────────────────────────────
+7. 페이지 레이아웃
+─────────────────────────────────────
+
+  ┌─────────────────────────────────────┐
+  │ 유저 관리                     [조회] │
+  ├─────────────────────────────────────┤
+  │ [신규] [삭제] [저장]                 │
+  ├─────────────────────────────────────┤
+  │ ☐ │ ID │ 이메일          │ 닉네임   │ 가입일          │
+  │ ☐ │  1 │ admin@test.com │ 관리자   │ 2024-01-15      │
+  │ ☐ │  3 │ user@test.com  │ 사용자   │ 2024-01-16      │
+  │ ☐ │    │ (편집 가능)     │ (편집)   │                 │  ← 신규 행
+  └─────────────────────────────────────┘
+
+
+■ 핵심 포인트
+
+  1. 그리드 안에서 바로 편집 (셀 더블클릭 → editor)
+  2. 변경사항은 로컬에만 반영, "저장" 클릭 시 서버로 일괄 전송
+  3. 한 번의 API 호출로 신규/수정/삭제 모두 처리
+  4. @Transactional로 전체 성공 또는 전체 롤백
