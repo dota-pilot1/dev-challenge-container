@@ -21,3 +21,32 @@ shop-api/src/database/schema.ts
 
 shop-api/src/order/dto/create-order.dto.ts
   → idempotencyKey 필드 정의
+
+
+─────────────────────────────────────
+■ 핵심 함수 — 키 생성 (ParticipationService.java)
+─────────────────────────────────────
+
+  // 참가 ID 기반 결정적 키 — 같은 참가는 항상 같은 키
+  String idempotencyKey = "participation-" + id;
+  shopClient.createOrder(..., idempotencyKey, ...);
+
+
+─────────────────────────────────────
+■ 핵심 함수 — 키 검증 (order.service.ts > create())
+─────────────────────────────────────
+
+  if (dto.idempotencyKey) {
+    const [existing] = await this.db
+      .select()
+      .from(orders)
+      .where(eq(orders.idempotencyKey, dto.idempotencyKey))
+      .limit(1);
+
+    if (existing) {
+      return existing;  // 기존 주문 반환, 새로 생성하지 않음
+    }
+  }
+
+→ 동일한 키로 이미 주문이 존재하면 그대로 반환
+→ 재시도해도 주문이 중복 생성되지 않음

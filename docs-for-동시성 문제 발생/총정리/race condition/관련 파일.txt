@@ -26,3 +26,27 @@ shop-api/src/product/product.service.ts
 
 shop-api/src/product/product.controller.ts
   → 상품 API 엔드포인트
+
+
+─────────────────────────────────────
+■ 핵심 함수 — order.service.ts > create()
+─────────────────────────────────────
+
+  // 원자적 재고 차감: stock >= quantity 인 경우에만 차감
+  const [updated] = await this.db
+    .update(products)
+    .set({
+      stock: sql`${products.stock} - ${quantity}`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(products.id, dto.productId), gte(products.stock, quantity)))
+    .returning();
+
+  if (!updated) {
+    throw new BadRequestException(
+      `재고가 부족합니다 (현재: ${product.stock}개 / 주문: ${quantity}개)`,
+    );
+  }
+
+→ 비교(stock >= quantity)와 차감(stock - quantity)을 하나의 UPDATE 쿼리로 처리
+→ DB가 행 잠금을 자동으로 걸어 동시 요청도 순차 처리됨

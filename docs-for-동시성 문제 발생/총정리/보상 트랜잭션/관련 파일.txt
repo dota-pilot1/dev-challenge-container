@@ -22,3 +22,59 @@ shop-api/src/order/order.controller.ts
 
 shop-api/src/order/dto/update-order-status.dto.ts
   → 상태 변경 요청 DTO
+
+
+─────────────────────────────────────
+■ 핵심 함수 — 보상 실행 (ParticipationService.java > approve())
+─────────────────────────────────────
+
+  try {
+      Map<String, Object> order = shopClient.createOrder(...);
+      Integer orderId = ((Number) order.get("id")).intValue();
+
+      try {
+          // 후속 처리 (내부 DB 업데이트)
+          participationMapper.updateOrderId(id, orderId);
+          participationMapper.updateStatus(id, "APPROVED");
+          approvalHistoryMapper.insert(...);
+      } catch (Exception postEx) {
+          // 후속 처리 실패 → 보상 트랜잭션: 주문 취소
+          try {
+              shopClient.cancelOrder(orderId);
+          } catch (Exception compensateEx) {
+              log.error("보상 트랜잭션 실패! 수동 확인 필요: orderId={}", orderId);
+          }
+          participationMapper.updateStatus(id, "APPROVE_FAILED");
+      }
+  } catch (Exception e) {
+      // 주문 자체 실패 → 보상 불필요
+      participationMapper.updateStatus(id, "APPROVE_FAILED");
+  }
+
+→ 3단계 방어: 주문 실패 / 후속 처리 실패 → 보상 / 보상도 실패 → 수동 확인
+
+
+─────────────────────────────────────
+■ 핵심 함수 — 주문 취소 (ShopClient.java > cancelOrder())
+─────────────────────────────────────
+
+  public void cancelOrder(int orderId) {
+      restClient.patch()
+          .uri("/orders/{id}/status", orderId)
+          .body(Map.of("status", "CANCELLED"))
+          .retrieve().toBodilessEntity();
+  }
+
+
+─────────────────────────────────────
+■ 핵심 함수 — 재고 복구 (order.service.ts > updateStatus())
+─────────────────────────────────────
+
+  if (dto.status === 'CANCELLED') {
+    await this.db
+      .update(products)
+      .set({ stock: product.stock + order.quantity, updatedAt: new Date() })
+      .where(eq(products.id, order.productId));
+  }
+
+→ CANCELLED 상태로 변경 시 차감했던 재고를 자동 복구
