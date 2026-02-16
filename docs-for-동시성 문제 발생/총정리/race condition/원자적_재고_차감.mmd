@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant A as 주문 요청 A
+    participant DB as PostgreSQL
+    participant B as 주문 요청 B
+
+    Note over A,B: 재고 1개인 상품에 동시 주문 요청
+
+    rect rgb(255, 230, 230)
+        Note over A,B: Before — 비교와 차감이 분리된 경우
+        A->>DB: SELECT stock FROM products (stock=1)
+        B->>DB: SELECT stock FROM products (stock=1)
+        Note right of B: 둘 다 재고 1개로 읽음
+        A->>DB: UPDATE stock = 0
+        B->>DB: UPDATE stock = -1
+        Note over DB: 재고가 음수! (Race Condition)
+    end
+
+    rect rgb(230, 255, 230)
+        Note over A,B: After — 비교+차감을 하나의 UPDATE로 처리
+        A->>DB: UPDATE stock = stock - 1 WHERE stock >= 1
+        activate DB
+        Note left of DB: 행 잠금 자동 획득
+        DB-->>A: 1 row updated (stock: 1→0)
+        deactivate DB
+
+        B->>DB: UPDATE stock = stock - 1 WHERE stock >= 1
+        activate DB
+        DB-->>B: 0 rows updated (stock=0, 조건 불충족)
+        deactivate DB
+        Note right of B: "재고가 부족합니다" → 거부
+    end

@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant Spring as concurrency-lab
+    participant Shop as shop-api
+    participant DB as 내부 DB
+
+    Spring->>Shop: 주문 생성 요청
+    Shop-->>Spring: 성공 (주문 #4, 재고 차감됨)
+
+    Spring->>DB: 참가 정보 업데이트 (주문 ID, 상태)
+    DB--xSpring: 실패! (DB 에러)
+
+    Note over Spring: 주문은 생성됐지만 참가 정보 미반영 → 유령 주문
+
+    rect rgb(255, 243, 205)
+        Note over Spring,Shop: 보상 트랜잭션 실행
+        Spring->>Shop: 주문 취소 요청 (cancelOrder)
+        Shop->>Shop: 주문 CANCELLED + 재고 복구
+        Shop-->>Spring: 취소 완료
+    end
+
+    Spring->>DB: 상태 → APPROVE_FAILED
+    Spring->>DB: 이력 저장 (FAILED + "보상 트랜잭션 실행됨")

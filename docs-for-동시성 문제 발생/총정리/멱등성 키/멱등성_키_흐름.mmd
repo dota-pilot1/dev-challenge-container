@@ -1,0 +1,24 @@
+sequenceDiagram
+    participant Spring as concurrency-lab
+    participant Shop as shop-api
+    participant DB as PostgreSQL (shop)
+
+    Note over Spring,DB: 첫 번째 요청 — 주문 생성
+
+    Spring->>Shop: createOrder(idempotencyKey="participation-3")
+    Shop->>DB: SELECT WHERE idempotency_key = "participation-3"
+    DB-->>Shop: 결과 없음
+    Shop->>DB: INSERT order + 재고 차감
+    DB-->>Shop: 주문 #4 생성
+    Shop-->>Spring: 주문 #4 반환
+
+    Spring->>Spring: 후속 처리 실패! → APPROVE_FAILED
+
+    Note over Spring,DB: 재시도 — 동일한 멱등성 키로 재요청
+
+    Spring->>Shop: createOrder(idempotencyKey="participation-3")
+    Shop->>DB: SELECT WHERE idempotency_key = "participation-3"
+    DB-->>Shop: 주문 #4 존재!
+    Shop-->>Spring: 기존 주문 #4 반환 (새로 생성하지 않음)
+
+    Note over Spring: 주문 중복 없이 안전하게 재시도 완료

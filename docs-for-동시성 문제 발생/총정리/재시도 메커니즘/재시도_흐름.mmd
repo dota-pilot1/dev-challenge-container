@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant 관리자
+    participant Spring as concurrency-lab
+    participant Shop as shop-api
+
+    관리자->>Spring: 승인 요청 (approve)
+    Spring->>Shop: 주문 생성 요청
+    Shop--xSpring: 실패 (재고 부족 등)
+
+    Spring->>Spring: 상태 → APPROVE_FAILED
+    Spring->>Spring: 이력 저장 (FAILED + 에러 메시지)
+    Spring-->>관리자: 실패 응답
+
+    Note over 관리자: 이력에서 실패 원인 확인 후 문제 해결
+
+    관리자->>Spring: 재시도 요청 (retryApprove)
+    Spring->>Shop: 주문 생성 요청 (동일 멱등성 키)
+    Shop-->>Spring: 성공 (주문 생성됨)
+
+    Spring->>Spring: 상태 → APPROVED
+    Spring->>Spring: 이력 저장 (SUCCESS + 주문 ID)
+    Spring-->>관리자: 성공 응답
