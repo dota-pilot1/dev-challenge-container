@@ -10,15 +10,18 @@ sequenceDiagram
     DB-->>A: 잠금 획득 + 상태: SUBMITTED
 
     B->>DB: SELECT ... WHERE id=3 FOR UPDATE
-    Note right of B: 대기 (잠금 해제까지 블로킹)
+    Note right of B: 잠금 대기 (A가 끝날 때까지 블로킹)
 
     A->>DB: UPDATE status = 'APPROVED'
+    Note left of A: A가 상태를 SUBMITTED → APPROVED로 변경
+
     A->>DB: COMMIT
     deactivate DB
-    Note over DB: 잠금 해제
+    Note over DB: 잠금 해제 → B가 이제서야 읽기 가능
 
     activate DB
-    DB-->>B: 잠금 획득 + 상태: APPROVED
+    DB-->>B: 잠금 획득 + 상태: APPROVED (이미 A가 변경한 값)
     deactivate DB
 
+    Note right of B: status != SUBMITTED 이므로 승인 불가
     B--xB: "제출 완료 상태에서만 승인 가능" → 거부
