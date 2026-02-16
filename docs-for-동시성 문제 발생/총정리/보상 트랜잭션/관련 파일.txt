@@ -1,0 +1,24 @@
+=====================================
+보상 트랜잭션 (Saga 패턴) — 관련 파일
+=====================================
+
+■ 핵심 파일 (보상 실행 — Spring Boot)
+
+concurrency-lab/.../service/ParticipationService.java
+  → approve(), retryApprove(): 후속 처리 실패 시 shopClient.cancelOrder() 호출
+  → 3단계 try-catch 구조 (주문 생성 → 후속 처리 → 보상 트랜잭션)
+
+concurrency-lab/.../client/ShopClient.java
+  → cancelOrder(): shop-api에 주문 취소 요청 (PATCH /orders/{id}/status)
+
+
+■ 핵심 파일 (취소 처리 — NestJS)
+
+shop-api/src/order/order.service.ts
+  → updateStatus(): CANCELLED 상태로 변경 시 재고 자동 복구 (stock + quantity)
+
+shop-api/src/order/order.controller.ts
+  → PATCH /orders/{id}/status 엔드포인트
+
+shop-api/src/order/dto/update-order-status.dto.ts
+  → 상태 변경 요청 DTO

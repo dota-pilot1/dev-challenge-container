@@ -1,0 +1,23 @@
+=====================================
+멱등성 키 (중복 주문 방지) — 관련 파일
+=====================================
+
+■ 핵심 파일 (키 생성 — Spring Boot)
+
+concurrency-lab/.../service/ParticipationService.java
+  → approve(), retryApprove(): idempotencyKey = "participation-" + id 생성
+
+concurrency-lab/.../client/ShopClient.java
+  → createOrder(): 멱등성 키를 shop-api 요청에 포함
+
+
+■ 핵심 파일 (키 검증 — NestJS)
+
+shop-api/src/order/order.service.ts
+  → create(): 멱등성 키로 기존 주문 조회 → 있으면 기존 주문 반환
+
+shop-api/src/database/schema.ts
+  → orders 테이블: idempotency_key 컬럼 (UNIQUE)
+
+shop-api/src/order/dto/create-order.dto.ts
+  → idempotencyKey 필드 정의

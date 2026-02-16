@@ -1,0 +1,28 @@
+=====================================
+Race Condition (원자적 재고 차감) — 관련 파일
+=====================================
+
+■ 핵심 파일
+
+shop-api/src/order/order.service.ts
+  → create() 메서드: 원자적 재고 차감 로직
+  → WHERE stock >= quantity 조건으로 비교+차감을 하나의 UPDATE로 처리
+
+shop-api/src/database/schema.ts
+  → products 테이블: stock 컬럼 정의
+  → orders 테이블: 주문 스키마 정의
+
+
+■ 관련 파일
+
+shop-api/src/order/dto/create-order.dto.ts
+  → 주문 생성 요청 DTO (productId, userId, quantity 등)
+
+shop-api/src/order/order.controller.ts
+  → POST /orders 엔드포인트
+
+shop-api/src/product/product.service.ts
+  → 상품 조회, 재고 수정 서비스
+
+shop-api/src/product/product.controller.ts
+  → 상품 API 엔드포인트

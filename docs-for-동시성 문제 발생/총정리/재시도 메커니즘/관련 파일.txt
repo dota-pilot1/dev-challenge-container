@@ -1,0 +1,37 @@
+=====================================
+재시도 메커니즘 — 관련 파일
+=====================================
+
+■ 핵심 파일 (백엔드)
+
+concurrency-lab/.../service/ParticipationService.java
+  → approve(): 실패 시 APPROVE_FAILED 상태 저장
+  → retryApprove(): APPROVE_FAILED 상태에서만 재시도 허용
+
+concurrency-lab/.../controller/ParticipationController.java
+  → PATCH /api/participations/{id}/retry-approve 엔드포인트
+
+
+■ 승인 이력 (실패 원인 추적용)
+
+concurrency-lab/.../entity/ApprovalHistory.java
+  → 승인 이력 엔티티 (action, status, errorMessage, orderId)
+
+concurrency-lab/.../mapper/ApprovalHistoryMapper.java
+  → 이력 저장/조회 인터페이스
+
+concurrency-lab/.../resources/mapper/ApprovalHistoryMapper.xml
+  → 이력 INSERT/SELECT 쿼리
+
+
+■ 프론트엔드
+
+devquest-web/src/routes/challenges.tsx
+  → APPROVE_FAILED 상태일 때 "재시도" / "더블 재시도" 버튼 표시
+  → 실패 시 ConfirmDialog로 에러 상세 표시
+
+devquest-web/src/shared/ui/confirm-dialog.tsx
+  → 에러 상세 다이얼로그 컴포넌트
+
+devquest-web/src/shared/lib/parse-error-message.ts
+  → JSON 에러 메시지 파싱 유틸

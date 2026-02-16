@@ -1,0 +1,23 @@
+=====================================
+동시 승인 방지 (비관적 락) — 관련 파일
+=====================================
+
+■ 핵심 파일
+
+concurrency-lab/.../resources/mapper/ParticipationMapper.xml
+  → findByIdForUpdate 쿼리: SELECT ... FOR UPDATE로 행 잠금
+
+concurrency-lab/.../mapper/ParticipationMapper.java
+  → findByIdForUpdate() 메서드 인터페이스
+
+concurrency-lab/.../service/ParticipationService.java
+  → approve() 메서드: 비관적 락 획득 → 상태 검증 → 승인 처리
+
+
+■ 관련 파일
+
+concurrency-lab/.../controller/ParticipationController.java
+  → PATCH /api/participations/{id}/approve 엔드포인트
+
+concurrency-lab/.../entity/Participation.java
+  → 참가 엔티티 (status 필드: SUBMITTED → APPROVED)
