@@ -1,0 +1,25 @@
+flowchart TD
+    A[에러 발생] --> B{어디서 발생?}
+
+    B -->|Spring Boot 내부| C[CustomException throw]
+    C --> D[GlobalExceptionHandler]
+    D --> E["ErrorResponse 반환<br/>(AUTH_401, COMMON_400 등)"]
+    E --> K[프론트: toast.error]
+
+    B -->|shop-api 내부| F[HttpException throw]
+    F --> G[HttpExceptionFilter]
+    G --> H["에러 응답 반환<br/>(PAYMENT_400, PAYMENT_404 등)"]
+    H --> I[Spring: ShopClient에서 캐치]
+    I --> J[APPROVE_FAILED + 이력 저장]
+    J --> L[프론트: ConfirmDialog 상세 표시]
+
+    B -->|shop-api 다운| M[RestClientException]
+    M --> I
+
+    B -->|후속 처리 실패| N[주문 성공 후 DB 에러]
+    N --> O[보상 트랜잭션 실행]
+    O --> P{보상 성공?}
+    P -->|성공| Q[주문 취소 + 재고 복구]
+    P -->|실패| R["로그: 수동 확인 필요"]
+    Q --> J
+    R --> J

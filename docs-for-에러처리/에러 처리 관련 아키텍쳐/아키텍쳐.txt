@@ -1,0 +1,62 @@
+=====================================
+에러 처리 아키텍쳐 — 3계층 구조
+=====================================
+
+■ 전체 구조
+
+  프론트엔드 (React)          백엔드 (Spring Boot)          백엔드 (NestJS)
+  ┌─────────────────┐       ┌─────────────────────┐      ┌────────────────────┐
+  │ API Client       │       │ Controller           │      │ Controller          │
+  │  → fetch 요청    │──────→│  → Service 호출      │      │  → Service 호출     │
+  │  → !res.ok 체크  │       │  → 예외 발생 가능    │      │  → 예외 발생 가능   │
+  │                  │       ├─────────────────────┤      ├────────────────────┤
+  │ React Query      │       │ GlobalExceptionHandler│     │ HttpExceptionFilter │
+  │  → 에러 캐치     │←──────│  → ErrorResponse 반환 │     │  → 통일 응답 반환   │
+  │  → onError 콜백  │       └─────────────────────┘      └────────────────────┘
+  │                  │
+  │ UI 표시          │
+  │  → toast (간단)  │
+  │  → dialog (상세) │
+  └─────────────────┘
+
+
+■ 핵심 설계 원칙
+
+  1. 중앙 집중 처리: 각 서비스마다 전역 예외 처리기가 모든 에러를 잡음
+  2. 통일된 응답 형식: 양쪽 백엔드 모두 동일한 구조로 에러 반환
+  3. 계층 분리: 서비스에서 예외 throw → 핸들러가 HTTP 응답으로 변환
+
+
+■ 통일된 에러 응답 형식 (양쪽 동일)
+
+  {
+    "code": "AUTH_401" 또는 "PAYMENT_404",
+    "message": "인증이 필요합니다",
+    "status": 401,
+    "path": "/api/users",
+    "timestamp": "2024-01-15T10:30:00"
+  }
+
+  → code: 에러 분류 코드
+  → message: 사용자에게 보여줄 메시지
+  → status: HTTP 상태 코드
+  → path: 요청 경로
+  → timestamp: 발생 시각
+
+
+■ 관련 파일
+
+  Spring Boot:
+    - exception/GlobalExceptionHandler.java — @RestControllerAdvice 전역 핸들러
+    - exception/CustomException.java — 커스텀 예외 클래스
+    - exception/ErrorCode.java — 에러 코드 enum (상태코드 + 메시지 매핑)
+    - dto/ErrorResponse.java — 에러 응답 DTO
+
+  NestJS:
+    - common/filters/http-exception.filter.ts — 전역 예외 필터
+    - main.ts — 필터 등록 (app.useGlobalFilters)
+
+  React:
+    - shared/api/client.ts — API 클라이언트 (에러 파싱)
+    - shared/lib/parse-error-message.ts — JSON 에러 메시지 추출
+    - shared/ui/confirm-dialog.tsx — 에러 상세 다이얼로그

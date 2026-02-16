@@ -1,0 +1,30 @@
+flowchart TD
+    subgraph Frontend ["프론트엔드 (React)"]
+        A[API Client - fetch 요청] --> B{res.ok?}
+        B -->|성공| C[React Query - 데이터 반환]
+        B -->|실패| D[에러 JSON 파싱]
+        D --> E[React Query - onError]
+        E --> F[toast.error 간단 알림]
+        E --> G[ConfirmDialog 상세 표시]
+    end
+
+    subgraph SpringBoot ["백엔드 (Spring Boot)"]
+        H[Controller] --> I[Service]
+        I -->|정상| J[응답 반환]
+        I -->|예외| K[CustomException throw]
+        K --> L[GlobalExceptionHandler]
+        L --> M[ErrorResponse 반환]
+    end
+
+    subgraph NestJS ["백엔드 (NestJS shop-api)"]
+        N[Controller] --> O[Service]
+        O -->|정상| P[응답 반환]
+        O -->|예외| Q[HttpException throw]
+        Q --> R[HttpExceptionFilter]
+        R --> S[통일 에러 응답 반환]
+    end
+
+    A -->|요청| H
+    A -->|요청| N
+    M -->|에러 응답| D
+    S -->|에러 응답| D

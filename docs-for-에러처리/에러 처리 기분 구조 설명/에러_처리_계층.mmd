@@ -1,0 +1,23 @@
+flowchart LR
+    subgraph Service ["서비스 계층"]
+        A[비즈니스 로직] -->|예외 발생| B[throw CustomException]
+        A -->|NestJS| C[throw BadRequestException]
+    end
+
+    subgraph Handler ["전역 핸들러"]
+        B --> D[GlobalExceptionHandler]
+        C --> E[HttpExceptionFilter]
+        D --> F[ErrorResponse 생성]
+        E --> G[통일 에러 응답 생성]
+    end
+
+    subgraph Response ["HTTP 응답"]
+        F --> H["{ code, message, status, path, timestamp }"]
+        G --> H
+    end
+
+    subgraph Frontend ["프론트엔드"]
+        H --> I[API Client 에러 감지]
+        I --> J[parseErrorMessage]
+        J --> K[toast 또는 dialog 표시]
+    end

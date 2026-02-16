@@ -1,0 +1,136 @@
+=====================================
+에러 처리 기본 구조 설명
+=====================================
+
+■ Spring Boot — 전역 예외 처리
+
+1. ErrorCode enum: 에러 종류별 상태코드 + 메시지 매핑
+
+  public enum ErrorCode {
+      AUTH_401(HttpStatus.UNAUTHORIZED, "AUTH_401", "인증이 필요합니다"),
+      AUTH_401_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401", "이메일 또는 비밀번호가 잘못되었습니다"),
+      AUTH_403(HttpStatus.FORBIDDEN, "AUTH_403", "권한이 없습니다"),
+      USER_409(HttpStatus.CONFLICT, "USER_409", "이미 사용 중인 이메일입니다"),
+      USER_404(HttpStatus.NOT_FOUND, "USER_404", "사용자를 찾을 수 없습니다"),
+      COMMON_400(HttpStatus.BAD_REQUEST, "COMMON_400", "잘못된 요청입니다"),
+      COMMON_500(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_500", "서버 오류");
+  }
+
+2. CustomException: 서비스에서 throw
+
+  // 기본 메시지 사용
+  throw new CustomException(ErrorCode.AUTH_401);
+
+  // 메시지 오버라이드
+  throw new CustomException(ErrorCode.COMMON_400, "제출 완료 상태에서만 승인할 수 있습니다");
+
+3. GlobalExceptionHandler: 모든 예외를 잡아서 ErrorResponse로 변환
+
+  @RestControllerAdvice
+  public class GlobalExceptionHandler {
+
+      @ExceptionHandler(CustomException.class)
+      public ResponseEntity<ErrorResponse> handleCustom(CustomException e, HttpServletRequest req) {
+          return ResponseEntity
+              .status(e.getErrorCode().getHttpStatus())
+              .body(ErrorResponse.of(e.getErrorCode(), req.getRequestURI()));
+      }
+
+      @ExceptionHandler(MethodArgumentNotValidException.class)
+      → 필드별 유효성 검증 에러 처리
+
+      @ExceptionHandler(Exception.class)
+      → 예상치 못한 에러 → 500 서버 오류
+  }
+
+4. ErrorResponse: 통일된 에러 응답 DTO
+
+  {
+    "code": "AUTH_401",
+    "message": "인증이 필요합니다",
+    "status": 401,
+    "path": "/api/auth/login",
+    "timestamp": "2024-01-15T10:30:00"
+  }
+
+
+■ NestJS — 전역 예외 필터
+
+1. 서비스에서 NestJS 내장 예외 throw
+
+  throw new NotFoundException("상품을 찾을 수 없습니다");
+  throw new BadRequestException("재고가 부족합니다");
+
+2. HttpExceptionFilter: @Catch(HttpException)으로 모든 HTTP 예외 캐치
+
+  @Catch(HttpException)
+  export class HttpExceptionFilter implements ExceptionFilter {
+    catch(exception: HttpException, host: ArgumentsHost) {
+      const status = exception.getStatus();
+      const response = exception.getResponse();
+
+      // 통일된 형식으로 변환
+      return {
+        code: `PAYMENT_${status}`,
+        message: response.message || response,
+        status: status,
+        path: request.url,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+3. main.ts에서 전역 등록
+
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+
+■ React — API 에러 처리
+
+1. API Client: fetch 응답에서 에러 감지
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.message ?? `HTTP ${res.status}`);
+  }
+
+2. parseErrorMessage: JSON 에러 문자열에서 message 추출
+
+  // 입력: '{"code":"PAYMENT_400","message":"재고가 부족합니다"}'
+  // 출력: "재고가 부족합니다"
+  export function parseErrorMessage(raw: string): string {
+    const jsonMatch = raw.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.message) return parsed.message;
+    }
+    return raw;
+  }
+
+3. React Query: 에러 시 onError 콜백 또는 UI에서 처리
+
+  useMutation({
+    mutationFn: ...,
+    onSuccess: () => toast.success("성공"),
+    onError: (err) => toast.error(err.message),
+  });
+
+4. ConfirmDialog: 상세 에러 표시 (승인 실패 사유 등)
+
+  <ConfirmDialog
+    variant="destructive"
+    title="승인 실패"
+    description="재고가 부족합니다 (현재: 0개 / 주문: 50개)"
+  />
+
+
+■ 에러 처리 흐름 요약
+
+  서비스 (throw) → 전역 핸들러 (catch + 변환) → HTTP 응답 → 프론트 (파싱 + 표시)
+
+  이 구조의 장점:
+  - 서비스 코드는 throw만 하면 됨 (응답 형식 신경 X)
+  - 전역 핸들러가 일관된 형식으로 변환
+  - 프론트는 하나의 형식만 파싱하면 됨
+  - 새 에러 추가 시 ErrorCode enum에 한 줄 추가로 끝

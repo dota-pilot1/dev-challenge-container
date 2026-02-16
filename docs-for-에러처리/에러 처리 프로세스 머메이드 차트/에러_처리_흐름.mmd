@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant User as 사용자
+    participant React as React (프론트)
+    participant Spring as Spring Boot
+    participant NestJS as NestJS (shop-api)
+
+    Note over User,NestJS: 케이스 1 — Spring Boot 에러 (인증 실패 등)
+
+    User->>React: 로그인 요청
+    React->>Spring: POST /api/auth/login
+    Spring->>Spring: BadCredentialsException throw
+    Spring->>Spring: GlobalExceptionHandler 캐치
+    Spring-->>React: { code: "AUTH_401", message: "이메일 또는 비밀번호가 잘못되었습니다" }
+    React->>React: !res.ok → 에러 JSON 파싱
+    React->>User: toast.error("이메일 또는 비밀번호가 잘못되었습니다")
+
+    Note over User,NestJS: 케이스 2 — NestJS 에러 (재고 부족 등)
+
+    User->>React: 승인 요청
+    React->>Spring: PATCH /api/participations/{id}/approve
+    Spring->>NestJS: POST /api/orders (주문 생성)
+    NestJS->>NestJS: BadRequestException throw ("재고 부족")
+    NestJS->>NestJS: HttpExceptionFilter 캐치
+    NestJS-->>Spring: { code: "PAYMENT_400", message: "재고가 부족합니다" }
+    Spring->>Spring: ShopClient에서 RestClientException 캐치
+    Spring->>Spring: APPROVE_FAILED + 이력(FAILED) 저장
+    Spring-->>React: 참가 정보 반환 (status: APPROVE_FAILED)
+    React->>User: ConfirmDialog로 에러 상세 표시
