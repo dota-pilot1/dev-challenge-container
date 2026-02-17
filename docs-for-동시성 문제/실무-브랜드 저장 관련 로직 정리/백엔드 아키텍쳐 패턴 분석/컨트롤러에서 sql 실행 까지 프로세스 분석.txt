@@ -1,0 +1,272 @@
+===============================================================================
+  컨트롤러에서 SQL 실행까지 프로세스 분석
+  (입점사 브랜드 저장 기준: savePartenrBrands 흐름)
+===============================================================================
+
+
+1. 전체 흐름 요약
+===============================================================================
+
+  [프론트엔드 (그리드)]
+       | POST /api/airstar/brands/partner-brands-save
+       | Body: List<PartnerBrandReqDto>  (status: "C" 또는 "U")
+       v
+  [AirstarBrandController]        -- 요청 수신, 서비스 호출
+       |
+       v
+  [AirstarBrandService]           -- 비즈니스 로직 (@Transactional)
+       |
+       v
+  [AirstarBrandMapper]            -- MyBatis 매퍼 인터페이스
+       |
+       v
+  [AirstarBrandMapper.xml]        -- 실제 SQL 정의
+       |
+       v
+  [PostgreSQL DB]                 -- fscps.bs_airstar_brand 테이블
+
+
+2. 파일별 역할과 코드 흐름
+===============================================================================
+
+
+  [파일 1] AirstarBrandController.java
+  위치: com.cj.freshway.fs.cps.airstar.brand
+  역할: HTTP 요청 수신, 서비스 호출
+  --------------------------------------------------------------------------
+
+      @RestController
+      @RequestMapping("api/airstar/brands")
+      public class AirstarBrandController {
+
+          @Autowired
+          AirstarBrandService airstarBrandService;
+
+          @PostMapping("/partner-brands-save")
+          public String savePartenrBrands(
+              HttpServletRequest req,
+              @RequestBody List<PartnerBrandReqDto> partnerBrandReqList
+          ) throws Exception {
+
+              airstarBrandService.savePartenrBrands(partnerBrandReqList);
+              //     ↑
+              //     서비스 호출 (여기서 트랜잭션 시작)
+              return "";
+          }
+      }
+
+      흐름: 프론트에서 JSON 배열 수신 → List<PartnerBrandReqDto>로 변환
+            → airstarBrandService.savePartenrBrands() 호출
+
+
+  [파일 2] AirstarBrandService.java
+  위치: com.cj.freshway.fs.cps.airstar.brand
+  역할: 비즈니스 로직 (DB 저장 + 외부 API 호출)
+  --------------------------------------------------------------------------
+
+      @Service
+      public class AirstarBrandService {
+
+          @Autowired
+          AirstarBrandMapper airstarBrandMapper;
+
+          @Autowired
+          MiddlewareApiManager middlewareApiManager;
+
+          @Transactional  <-- 트랜잭션 시작 (DB 커넥션 획득)
+          public void savePartenrBrands(List<PartnerBrandReqDto> list) {
+
+              for (PartnerBrandReqDto partnerBrand : list) {
+
+                  if ("C".equals(partnerBrand.getStatus())) {
+                      airstarBrandMapper.insertPartnerBrand(partnerBrand);
+                      //     ↑
+                      //     매퍼 호출 → SQL 실행 (INSERT)
+                  }
+                  else if ("U".equals(partnerBrand.getStatus())) {
+                      airstarBrandMapper.updatePartnerBrand(partnerBrand);
+                      //     ↑
+                      //     매퍼 호출 → SQL 실행 (UPDATE)
+                  }
+              }
+
+              // 이후 외부 API 호출 (CP204, CP206)...
+          }
+      }
+
+      흐름: status "C" → insertPartnerBrand() 호출
+            status "U" → updatePartnerBrand() 호출
+            → 이후 외부 API 호출
+
+
+  [파일 3] AirstarBrandMapper.java
+  위치: com.cj.freshway.fs.cps.airstar.brand
+  역할: MyBatis 매퍼 인터페이스 (Java와 SQL을 연결하는 다리)
+  --------------------------------------------------------------------------
+
+      @Mapper
+      public interface AirstarBrandMapper {
+
+          Integer insertPartnerBrand(PartnerBrandReqDto dto);
+          //      ↑
+          //      메서드 이름이 XML의 id와 매칭됨
+
+          Integer updatePartnerBrand(PartnerBrandReqDto dto);
+          //      ↑
+          //      메서드 이름이 XML의 id와 매칭됨
+      }
+
+      흐름: 서비스에서 이 인터페이스의 메서드를 호출하면
+            MyBatis가 같은 이름의 XML SQL을 찾아서 실행함
+            (구현체는 MyBatis가 프록시로 자동 생성)
+
+
+  [파일 4] AirstarBrandMapper.xml
+  위치: resources/mappers/cps/airstar/
+  역할: 실제 SQL 정의
+  --------------------------------------------------------------------------
+
+      <mapper namespace="...airstar.brand.AirstarBrandMapper">
+          ↑ namespace가 매퍼 인터페이스의 패키지 경로와 일치해야 함
+
+          <!-- INSERT (id가 매퍼 인터페이스 메서드명과 일치) -->
+          <insert id="insertPartnerBrand"
+                  parameterType="...PartnerBrandReqDto">
+              INSERT INTO fscps.bs_airstar_brand (
+                  co_id, brand_code, shop_id, ste_id,
+                  brand_name_kor, brand_name_en, brand_name_jp,
+                  brand_name_zh_cn, brand_name_zh_tw,
+                  brand_desc, use_yn, reg_id, reg_dttm
+              ) VALUES (
+                  #{coId}, #{brandCode}, #{shopId}, #{steId},
+                  #{brandNameKr}, #{brandNameEn}, #{brandNameJp},
+                  #{brandNameZhCn}, #{brandNameZhTw},
+                  #{brandDesc}, #{useYn}, #{regId}, CURRENT_TIMESTAMP
+              )
+          </insert>
+
+          <!-- UPDATE -->
+          <update id="updatePartnerBrand"
+                  parameterType="...PartnerBrandReqDto">
+              UPDATE fscps.bs_airstar_brand
+              SET brand_name_kor = #{brandNameKr},
+                  brand_name_en = #{brandNameEn},
+                  ...
+                  upd_dttm = CURRENT_TIMESTAMP
+              WHERE co_id = #{coId}
+                AND brand_code = #{brandCode}
+                AND shop_id = #{shopId}
+                AND ste_id = #{steId}
+          </update>
+      </mapper>
+
+      흐름: #{coId}, #{brandCode} 등은 PartnerBrandReqDto의
+            필드값이 자동으로 바인딩됨
+
+
+3. 연결 원리: 매퍼 인터페이스 ↔ XML 매핑
+================================================================================
+
+  Java 매퍼 인터페이스:
+      패키지: com.cj.freshway.fs.cps.airstar.brand.AirstarBrandMapper
+      메서드: insertPartnerBrand(PartnerBrandReqDto dto)
+
+  XML 매퍼:
+      namespace: com.cj.freshway.fs.cps.airstar.brand.AirstarBrandMapper
+      id:        insertPartnerBrand
+
+  매칭 규칙:
+      XML namespace == Java 인터페이스 전체 경로
+      XML id        == Java 메서드 이름
+
+  → MyBatis가 이 둘을 매칭하여, 메서드 호출 시 해당 SQL을 실행함
+
+
+요약:
+===========================================================================
+일반적인 Java 인터페이스:**
+```
+인터페이스 → Java 클래스가 구현 (implements)
+```
+
+**MyBatis 매퍼 인터페이스:**
+```
+인터페이스 → XML의 SQL이 구현
+```
+
+즉, `insertPartnerBrand()` 메서드의 **구현체가 Java 코드가 아니라 XML에 있는 SQL**인 겁니다.
+
+```
+AirstarBrandMapper.java:  Integer insertPartnerBrand(dto)  ← 선언만
+                                      ↓ MyBatis가 연결
+AirstarBrandMapper.xml:   <insert id="insertPartnerBrand"> INSERT INTO ... </insert>  ← 실제 구현
+```
+
+일반 인터페이스는 `class Impl implements Interface`로 구현하지만, MyBatis에서는 **XML의 SQL이 곧 구현체** 역할을 하는 것
+=============================================================================
+
+
+4. 전체 흐름 다이어그램
+================================================================================
+
+  [프론트엔드]
+       |
+       | POST /api/airstar/brands/partner-brands-save
+       | Body: [{ status: "C", brandCode: "NIKE", ... },
+       |        { status: "U", brandCode: "ADIDAS", ... }]
+       v
+  [AirstarBrandController]
+       |  savePartenrBrands(req, partnerBrandReqList)
+       v
+  [AirstarBrandService]  @Transactional (커넥션 획득)
+       |
+       |  for문으로 각 행 처리:
+       |
+       |  status "C" → airstarBrandMapper.insertPartnerBrand(dto)
+       |                    |
+       |                    v
+       |              [AirstarBrandMapper.java] (인터페이스)
+       |                    |  MyBatis 프록시가 XML 매칭
+       |                    v
+       |              [AirstarBrandMapper.xml]
+       |                    |  <insert id="insertPartnerBrand">
+       |                    v
+       |              INSERT INTO fscps.bs_airstar_brand VALUES (...)
+       |                    |
+       |                    v
+       |              [PostgreSQL DB]  ← SQL 실행
+       |
+       |  status "U" → airstarBrandMapper.updatePartnerBrand(dto)
+       |                    |
+       |                    v
+       |              [AirstarBrandMapper.xml]
+       |                    |  <update id="updatePartnerBrand">
+       |                    v
+       |              UPDATE fscps.bs_airstar_brand SET ... WHERE ...
+       |                    |
+       |                    v
+       |              [PostgreSQL DB]  ← SQL 실행
+       |
+       |  (이후 외부 API 호출 - CP204/CP206)
+       |
+       v
+  @Transactional 종료 (커밋, 커넥션 반환)
+
+
+5. 파일 요약 표
+===============================================================================
+
+  +----+------------------------------+----------+---------------------------+
+  | #  | 파일                         | 계층     | 역할                      |
+  +----+------------------------------+----------+---------------------------+
+  | 1  | AirstarBrandController.java  | 컨트롤러 | HTTP 요청 수신, 서비스 호출|
+  | 2  | AirstarBrandService.java     | 서비스   | 비즈니스 로직, 트랜잭션    |
+  | 3  | AirstarBrandMapper.java      | 매퍼     | 인터페이스 (메서드 선언)   |
+  | 4  | AirstarBrandMapper.xml       | SQL      | 실제 SQL 정의              |
+  | 5  | PostgreSQL DB                | DB       | 테이블에 데이터 저장       |
+  +----+------------------------------+----------+---------------------------+
+
+  핵심: Controller → Service → Mapper(인터페이스) → XML(SQL) → DB
+        이 4단계 계층 구조가 Spring + MyBatis의 기본 아키텍처 패턴이다.
+
+===============================================================================
