@@ -1,0 +1,42 @@
+예를 들어 다음과 같은 디티오 클래스가 있다고 치자
+============================================================================
+
+package com.opro.concurrency.dto;
+
+import java.util.List;
+import lombok.Data;
+
+@Data
+public class BrandSaveRequest {
+
+    private List<BrandRow> rows;
+
+    @Data
+    public static class BrandRow {
+        private Long id;
+        private String brandCode;
+        private String shopId;
+        private String steId;
+        private String brandNameKo;
+        private String brandNameEn;
+        private String brandNameJp;
+        private String brandNameZhCn;
+        private String brandNameZhTw;
+        private String brandDesc;
+        private String useYn;
+        private Integer version;
+        private String status; // C: Create, U: Update, D: Delete
+    }
+}
+
+============================================================================
+
+1. 이중 디티오 클래스인데 이렇게 구성한 이유는 저장할 데이터가 전체적으로 리스트 부분적으로 객체라서
+
+ex)
+BrandSaveRequest          ← 요청 전체
+  └─ List<BrandRow> rows  ← 행 목록
+       ├─ BrandRow { status:"C", brandCode:"BR001", ... }  ← 신규
+       └─ BrandRow { status:"U", id:5, brandNameKo:"수정", ... }  ← 수정
+
+2.

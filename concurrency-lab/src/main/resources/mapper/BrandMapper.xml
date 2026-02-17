@@ -16,7 +16,7 @@
             #{brandCode}, #{shopId}, #{steId},
             #{brandNameKo}, #{brandNameEn}, #{brandNameJp},
             #{brandNameZhCn}, #{brandNameZhTw},
-            #{brandDesc}, #{useYn}, 'NONE', #{regId},
+            #{brandDesc}, #{useYn}, COALESCE(#{syncStatus}, 'NONE'), #{regId},
             NOW(), NOW(), 0
         )
     </insert>

@@ -1,15 +1,18 @@
 package com.opro.concurrency.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opro.concurrency.client.BrandSyncClient;
 import com.opro.concurrency.dto.BrandSaveRequest;
+import com.opro.concurrency.dto.BrandSyncData;
 import com.opro.concurrency.entity.Brand;
+import com.opro.concurrency.entity.BrandSyncHistory;
 import com.opro.concurrency.exception.CustomException;
 import com.opro.concurrency.exception.ErrorCode;
 import com.opro.concurrency.mapper.BrandMapper;
+import com.opro.concurrency.mapper.BrandSyncHistoryMapper;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,8 +23,13 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class BrandService {
 
+    /** DB 저장 결과를 syncToExternal에 넘기기 위한 DTO */
+    public record SavedBrand(Brand brand, String syncType) {}
+
     private final BrandMapper brandMapper;
+    private final BrandSyncHistoryMapper brandSyncHistoryMapper;
     private final BrandSyncClient brandSyncClient;
+    private final ObjectMapper objectMapper;
 
     public List<Brand> findAll() {
         return brandMapper.findAll();
@@ -54,23 +62,33 @@ public class BrandService {
     }
 
     /**
-     * [문제 재현용] 실무 코드와 동일한 패턴
-     * @Transactional 안에서 DB 저장 + 외부 API 호출을 같이 수행
+     * 통합 메서드 (트랜잭션 없음 — 각 단계가 자체 트랜잭션)
      *
-     * 문제점:
-     * 1. 외부 API 성공 → 후속 처리 중 예외 → DB 롤백, 외부는 이미 반영됨
-     * 2. DB 저장 후 외부 API 타임아웃 → 트랜잭션 장시간 점유 (커넥션 낭비)
-     * 3. 동시 요청 시 같은 brandCode에 대해 경합 발생
+     * [개선 전] @Transactional 안에서 DB 저장 + 외부 API 호출 → 커넥션 장시간 점유, 정합성 문제
+     * [개선 후] DB 저장(TX#1) → 커밋 → 외부 API 호출(트랜잭션 없음) → 결과 업데이트(TX#2)
+     */
+    public void saveAndSync(BrandSaveRequest request) {
+        // 1. DB 저장 (트랜잭션 #1 — 커밋 후 커넥션 반환)
+        List<SavedBrand> savedBrands = saveBrands(request);
+
+        // 2. 외부 API 호출 (트랜잭션 밖 — DB 커넥션 점유 안함)
+        //    + 결과 업데이트 (트랜잭션 #2)
+        if (!savedBrands.isEmpty()) {
+            syncToExternal(savedBrands);
+        }
+    }
+
+    /**
+     * DB 저장만 수행 (INSERT/UPDATE + syncStatus=PENDING)
+     * 트랜잭션 커밋 후 DB 커넥션 즉시 반환
      */
     @Transactional
-    public void saveAndSync(BrandSaveRequest request) {
-        List<Map<String, Object>> syncList = new ArrayList<>();
-        List<Long> savedBrandIds = new ArrayList<>();
+    public List<SavedBrand> saveBrands(BrandSaveRequest request) {
+        List<SavedBrand> savedBrands = new ArrayList<>();
 
-        // 1단계: DB 저장 (실무 코드의 for 루프와 동일)
         for (BrandSaveRequest.BrandRow row : request.getRows()) {
             log.info(
-                "saveAndSync row: status={}, id={}, brandCode={}, brandNameKo={}",
+                "saveBrands row: status={}, id={}, brandCode={}, brandNameKo={}",
                 row.getStatus(),
                 row.getId(),
                 row.getBrandCode(),
@@ -86,19 +104,13 @@ public class BrandService {
                         .brandNameEn(row.getBrandNameEn())
                         .brandDesc(row.getBrandDesc())
                         .useYn(row.getUseYn())
+                        // 외부 api 요청 성공 여부
+                        .syncStatus("PENDING")
                         .build();
+                    // 디비에 저장
                     brandMapper.insert(brand);
-                    savedBrandIds.add(brand.getId());
-
-                    Map<String, Object> syncData = new HashMap<>();
-                    syncData.put("brandCode", row.getBrandCode());
-                    syncData.put("shopId", row.getShopId());
-                    syncData.put("brandMid", row.getSteId());
-                    syncData.put("brandNameKo", row.getBrandNameKo());
-                    syncData.put("brandNameEn", row.getBrandNameEn());
-                    syncData.put("brandDesc", row.getBrandDesc());
-                    syncData.put("useYn", row.getUseYn());
-                    syncList.add(syncData);
+                    // 외부 api 에 보낼 savedBrands 에 추가
+                    savedBrands.add(new SavedBrand(brand, "REGISTER"));
                 }
                 case "U" -> {
                     Brand brand = brandMapper
@@ -111,32 +123,126 @@ public class BrandService {
                     brand.setBrandDesc(row.getBrandDesc());
                     brand.setUseYn(row.getUseYn());
                     brandMapper.update(brand);
-                    savedBrandIds.add(brand.getId());
-
-                    Map<String, Object> syncData = new HashMap<>();
-                    syncData.put("brandCode", row.getBrandCode());
-                    syncData.put("shopId", row.getShopId());
-                    syncData.put("brandMid", row.getSteId());
-                    syncData.put("brandNameKo", row.getBrandNameKo());
-                    syncData.put("brandNameEn", row.getBrandNameEn());
-                    syncData.put("brandDesc", row.getBrandDesc());
-                    syncData.put("useYn", row.getUseYn());
-                    syncList.add(syncData);
+                    brandMapper.updateSyncStatus(
+                        brand.getId(),
+                        "PENDING",
+                        null // 이전 업데이트된 싱크 데이터는 건드리지 않음
+                    );
+                    savedBrands.add(new SavedBrand(brand, "UPDATE"));
                 }
                 default -> log.warn("알 수 없는 status: {}", row.getStatus());
             }
         }
 
-        // 2단계: 같은 트랜잭션 안에서 외부 API 호출 (문제의 핵심!)
-        if (!syncList.isEmpty()) {
-            log.info("외부 플랫폼 동기화 요청: {}건", syncList.size());
-            brandSyncClient.registerBrands(syncList);
-            log.info("외부 플랫폼 동기화 완료");
+        return savedBrands;
+    }
 
-            // 동기화 성공 시 syncStatus 업데이트
-            for (Long brandId : savedBrandIds) {
-                brandMapper.updateSyncStatus(brandId, "SUCCESS", null);
+    /**
+     * 외부 API 호출 (트랜잭션 밖 — DB 커넥션 점유하지 않음)
+     * 호출 전후로 brand_sync_history에 이력 기록
+     */
+    public void syncToExternal(List<SavedBrand> savedBrands) {
+        // 외부 API에 보낼 데이터 목록
+        List<BrandSyncData> syncList = new ArrayList<>();
+        // 이력 테이블에 저장할 PENDING 이력 (성공/실패 시 업데이트용)
+        List<BrandSyncHistory> histories = new ArrayList<>();
+        // brand 테이블의 syncStatus 업데이트용 ID 목록
+        List<Long> brandIds = new ArrayList<>();
+
+        // 1. 동기화 데이터 준비 + 이력 PENDING 저장
+        for (SavedBrand saved : savedBrands) {
+            Brand brand = saved.brand();
+            brandIds.add(brand.getId());
+            BrandSyncData syncData = BrandSyncData.from(brand);
+            // 외부 api 에 보낼 브랜드 데이터 리스트에 추가 하기
+            syncList.add(syncData);
+            BrandSyncHistory history = BrandSyncHistory.builder()
+                .brandId(brand.getId())
+                .brandCode(brand.getBrandCode())
+                .syncType(saved.syncType())
+                .syncStatus("PENDING")
+                .requestPayload(toJson(syncData))
+                .build();
+            saveHistory(history);
+            histories.add(history);
+        }
+
+        if (syncList.isEmpty()) return;
+
+        // 2. 외부 API 호출 (DB 커넥션 점유 안함)
+        try {
+            log.info("외부 플랫폼 동기화 요청: {}건", syncList.size());
+            // 외부 api 요청 날려서 브랜드 데이터 동기화
+            String response = brandSyncClient.registerBrands(syncList);
+            log.info("외부 플랫폼 동기화 완료");
+            // brand_sync_history 테이블: PENDING → SUCCESS로 업데이트
+            for (BrandSyncHistory history : histories) {
+                completeHistory(history.getId(), "SUCCESS", response, null);
             }
+            // brand 테이블: syncStatus를 SUCCESS로 업데이트
+            updateSyncResults(brandIds, "SUCCESS", null);
+        } catch (Exception e) {
+            log.error("외부 동기화 실패: {}", e.getMessage());
+
+            // 3-B. 실패: 이력 FAILED + brand syncStatus FAILED
+            for (BrandSyncHistory history : histories) {
+                completeHistory(
+                    history.getId(),
+                    "FAILED",
+                    null,
+                    e.getMessage()
+                );
+            }
+            updateSyncResults(brandIds, "FAILED", e.getMessage());
+        }
+    }
+
+    /**
+     * 이력 저장 (별도 트랜잭션)
+     */
+    @Transactional
+    public void saveHistory(BrandSyncHistory history) {
+        brandSyncHistoryMapper.insert(history);
+    }
+
+    /**
+     * 이력 상태 업데이트 (별도 트랜잭션)
+     */
+    @Transactional
+    public void completeHistory(
+        Long historyId,
+        String status,
+        String responsePayload,
+        String errorMessage
+    ) {
+        brandSyncHistoryMapper.updateStatus(
+            historyId,
+            status,
+            responsePayload,
+            errorMessage
+        );
+    }
+
+    /**
+     * syncStatus 일괄 업데이트 (별도 트랜잭션)
+     */
+    @Transactional
+    public void updateSyncResults(
+        List<Long> brandIds,
+        String status,
+        String error
+    ) {
+        for (Long brandId : brandIds) {
+            brandMapper.updateSyncStatus(brandId, status, error);
+        }
+    }
+
+    private String toJson(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            log.warn("JSON 직렬화 실패: {}", e.getMessage());
+            return null;
         }
     }
 

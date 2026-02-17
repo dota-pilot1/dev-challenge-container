@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.opro.concurrency.mapper.BrandSyncHistoryMapper">
+
+    <insert id="insert" parameterType="com.opro.concurrency.entity.BrandSyncHistory"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO brand_sync_history (
+            brand_id, brand_code, sync_type, sync_status,
+            request_payload, created_at
+        ) VALUES (
+            #{brandId}, #{brandCode}, #{syncType}, #{syncStatus},
+            #{requestPayload}, NOW()
+        )
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE brand_sync_history
+        SET sync_status = #{syncStatus},
+            response_payload = #{responsePayload},
+            error_message = #{errorMessage},
+            completed_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="incrementRetryCount">
+        UPDATE brand_sync_history
+        SET retry_count = retry_count + 1
+        WHERE id = #{id}
+    </update>
+
+    <select id="findAll" resultType="com.opro.concurrency.entity.BrandSyncHistory">
+        SELECT id, brand_id, brand_code, sync_type, sync_status,
+               request_payload, response_payload, error_message,
+               retry_count, created_at, completed_at
+        FROM brand_sync_history
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="findByBrandId" resultType="com.opro.concurrency.entity.BrandSyncHistory">
+        SELECT id, brand_id, brand_code, sync_type, sync_status,
+               request_payload, response_payload, error_message,
+               retry_count, created_at, completed_at
+        FROM brand_sync_history
+        WHERE brand_id = #{brandId}
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="findByStatus" resultType="com.opro.concurrency.entity.BrandSyncHistory">
+        SELECT id, brand_id, brand_code, sync_type, sync_status,
+               request_payload, response_payload, error_message,
+               retry_count, created_at, completed_at
+        FROM brand_sync_history
+        WHERE sync_status = #{syncStatus}
+        ORDER BY created_at
+    </select>
+
+</mapper>

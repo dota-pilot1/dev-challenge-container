@@ -1,0 +1,27 @@
+1.
+@Data 어노테이션을 통해 알수 있는것
+=================================================
+@Data  // ← 이 어노테이션이
+public class BrandSaveRequest {
+    private List<BrandRow> rows;  // ← 이 필드를 보고
+}
+
+// 컴파일할 때 자동으로 이걸 만들어줌:
+// public List<BrandRow> getRows() { return this.rows; }
+// public void setRows(List<BrandRow> rows) { this.rows = rows; }
+// public String toString() { ... }
+// public boolean equals(Object o) { ... }
+// public int hashCode() { ... }
+=================================================
+
+2.
+@Data 의 구조가 이중인 이유
+
+BrandSaveRequest          ← 요청 전체
+  └─ List<BrandRow> rows  ← 행 목록
+       ├─ BrandRow { status:"C", brandCode:"BR001", ... }  ← 신규
+       └─ BrandRow { status:"U", id:5, brandNameKo:"수정", ... }  ← 수정
+
+=================================================
+
+3.

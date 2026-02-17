@@ -1,7 +1,7 @@
 package com.opro.concurrency.client;
 
+import com.opro.concurrency.dto.BrandSyncData;
 import java.util.List;
-import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -21,26 +21,19 @@ public class BrandSyncClient {
 
     /**
      * shop-api(외부 플랫폼)에 브랜드 일괄 등록/수정 요청
-     * 실무의 CP204(등록) / CP206(수정)에 해당
      */
-    @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> registerBrands(
-        List<Map<String, Object>> brands
-    ) {
+    public String registerBrands(List<BrandSyncData> brands) {
         log.info("shop-api 브랜드 동기화 요청: {}건", brands.size());
 
-        List<Map<String, Object>> response = restClient
+        String response = restClient
             .post()
             .uri("/brands/register-batch")
             .header("Content-Type", "application/json")
             .body(brands)
             .retrieve()
-            .body(List.class);
+            .body(String.class);
 
-        log.info(
-            "shop-api 브랜드 동기화 완료: {}건",
-            response != null ? response.size() : 0
-        );
+        log.info("shop-api 브랜드 동기화 완료: {}건", brands.size());
         return response;
     }
 

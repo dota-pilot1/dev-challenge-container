@@ -16,6 +16,7 @@ import { Route as ConcurrencyTestRouteImport } from './routes/concurrency-test'
 import { Route as ChallengesRouteImport } from './routes/challenges'
 import { Route as BrandsExternalRouteImport } from './routes/brands-external'
 import { Route as BrandsRouteImport } from './routes/brands'
+import { Route as BrandSyncHistoryRouteImport } from './routes/brand-sync-history'
 import { Route as ApprovalHistoryRouteImport } from './routes/approval-history'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -54,6 +55,11 @@ const BrandsRoute = BrandsRouteImport.update({
   path: '/brands',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BrandSyncHistoryRoute = BrandSyncHistoryRouteImport.update({
+  id: '/brand-sync-history',
+  path: '/brand-sync-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApprovalHistoryRoute = ApprovalHistoryRouteImport.update({
   id: '/approval-history',
   path: '/approval-history',
@@ -68,6 +74,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brand-sync-history': typeof BrandSyncHistoryRoute
   '/brands': typeof BrandsRoute
   '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brand-sync-history': typeof BrandSyncHistoryRoute
   '/brands': typeof BrandsRoute
   '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/approval-history': typeof ApprovalHistoryRoute
+  '/brand-sync-history': typeof BrandSyncHistoryRoute
   '/brands': typeof BrandsRoute
   '/brands-external': typeof BrandsExternalRoute
   '/challenges': typeof ChallengesRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/approval-history'
+    | '/brand-sync-history'
     | '/brands'
     | '/brands-external'
     | '/challenges'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/approval-history'
+    | '/brand-sync-history'
     | '/brands'
     | '/brands-external'
     | '/challenges'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/approval-history'
+    | '/brand-sync-history'
     | '/brands'
     | '/brands-external'
     | '/challenges'
@@ -138,6 +150,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApprovalHistoryRoute: typeof ApprovalHistoryRoute
+  BrandSyncHistoryRoute: typeof BrandSyncHistoryRoute
   BrandsRoute: typeof BrandsRoute
   BrandsExternalRoute: typeof BrandsExternalRoute
   ChallengesRoute: typeof ChallengesRoute
@@ -198,6 +211,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BrandsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/brand-sync-history': {
+      id: '/brand-sync-history'
+      path: '/brand-sync-history'
+      fullPath: '/brand-sync-history'
+      preLoaderRoute: typeof BrandSyncHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/approval-history': {
       id: '/approval-history'
       path: '/approval-history'
@@ -218,6 +238,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApprovalHistoryRoute: ApprovalHistoryRoute,
+  BrandSyncHistoryRoute: BrandSyncHistoryRoute,
   BrandsRoute: BrandsRoute,
   BrandsExternalRoute: BrandsExternalRoute,
   ChallengesRoute: ChallengesRoute,

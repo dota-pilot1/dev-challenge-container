@@ -1,0 +1,354 @@
+===============================================================================
+  실무 프로젝트의 브랜드 저장 로직 문제점 분석
+  (실무 AirstarBrandService vs concurrency-lab BrandService 비교)
+===============================================================================
+
+1. 전체 아키텍처 비교
+===============================================================================
+
+[실무 패키지 구조]
+  com.cj.freshway.fs.cps.airstar
+    brand/
+      AirstarBrandController        -- 컨트롤러
+      AirstarBrandService           -- 서비스
+      AirstarBrandMapper            -- 매퍼
+      dto/
+        PartnerBrandReqDto          -- 프론트 요청 DTO
+        PartnerBrandApiRegReqDto    -- 플랫폼 API 전송용 DTO
+        PartnerBrandApiResDto       -- 입점사 브랜드 응답 DTO
+        PlatformBrandApiResDto      -- 플랫폼 브랜드 응답 DTO
+      entity/
+        PartnerBrandEntity          -- 입점사 브랜드 엔티티
+        PlatformBrandEntity         -- 플랫폼 브랜드 엔티티
+    middleware/
+      MiddlewareApiManager          -- 중계서버 API 호출 공통
+      AirstarInterfaceInfoMapper    -- 인터페이스 정보 매퍼
+      dto/MiddlewareReqDto          -- 중계서버 요청 DTO
+      dto/MiddlewareResDto          -- 중계서버 응답 DTO
+      entity/MiddlewareIfReqEntity  -- 인터페이스 정보 엔티티
+    common/enums/
+      AirstarResCodeEnum            -- 응답 코드 열거형
+
+[랩 패키지 구조]
+  com.opro.concurrency
+    controller/BrandController
+    service/BrandService
+    mapper/BrandMapper
+    mapper/BrandSyncHistoryMapper       <-- 실무에 없음
+    entity/Brand
+    entity/BrandSyncHistory             <-- 실무에 없음
+    client/BrandSyncClient              <-- 외부 API 직접 호출
+    dto/BrandSyncData
+
+[구조 비교 요약]
+  +-----------------------+---------------------------------------+----------------------------------+
+  | 관점                  | 실무                                  | 랩                               |
+  +-----------------------+---------------------------------------+----------------------------------+
+  | 엔티티 수             | 2개 (PartnerBrand, PlatformBrand)     | 1개 (Brand) + 1개 이력           |
+  | 외부 통신 계층        | MiddlewareApiManager (중계서버 경유)  | BrandSyncClient (직접 호출)      |
+  | DTO 개수              | 6개 (요청/응답/API별 분리)            | 2개 (BrandSaveRequest, SyncData) |
+  | 동기화 상태 관리      | 없음                                  | syncStatus, retryCount 등        |
+  | DI 방식               | @Autowired 필드 주입                  | @RequiredArgsConstructor 생성자  |
+  +-----------------------+---------------------------------------+----------------------------------+
+
+
+2. 핵심 문제: 트랜잭션 범위와 DB 커넥션 점유
+===============================================================================
+
+[실무 코드 - savePartenrBrands()]
+
+  @Transactional  <-- 메서드 전체를 하나의 트랜잭션으로 감쌈
+  public void savePartenrBrands(List<PartnerBrandReqDto> list) throws Exception {
+
+      // [단계 1] DB INSERT/UPDATE
+      for (PartnerBrandReqDto brand : list) {
+          if ("C".equals(brand.getStatus()))
+              airstarBrandMapper.insertPartnerBrand(brand);   // DB INSERT
+          else if ("U".equals(brand.getStatus()))
+              airstarBrandMapper.updatePartnerBrand(brand);   // DB UPDATE
+      }
+
+      // [단계 2] 외부 플랫폼 API 호출 - 등록 (CP204)
+      if (!regList.isEmpty()) {
+          MiddlewareReqDto reqDto = middlewareApiManager.getInterfaceInfo("CP204");
+          middlewareApiManager.sendRequest(reqDto, ...);  // 중계서버 -> Airstar
+      }
+
+      // [단계 3] 외부 플랫폼 API 호출 - 수정 (CP206)
+      if (!upList.isEmpty()) {
+          MiddlewareReqDto upReqDto = middlewareApiManager.getInterfaceInfo("CP206");
+          middlewareApiManager.sendRequest(upReqDto, ...);  // 중계서버 -> Airstar
+      }
+  }
+  // --> 코드 내 주석: "//db 트랜젝션과 api 요청 분리필요[TODO]"
+
+[문제점 - DB 커넥션 점유 타임라인]
+
+  시간축 --->
+
+  [요청 시작]                                                    [요청 종료]
+      |--- @Transactional 시작 (DB 커넥션 획득) -------------------|
+      |                                                            |
+      |-- DB INSERT/UPDATE --|-- 중계서버 API 호출 대기 ------------|
+      |   (수 ms)            |   (수 초 ~ 수십 초)                 |
+      |                      |   ^^^ 커넥션 점유 상태 유지 ^^^     |
+      |                      |                                     |
+
+  - @Transactional이 DB 저장 + 외부 API 호출 전체를 감싸고 있음
+  - DB INSERT/UPDATE 완료 후에도 트랜잭션이 열려 있어 커넥션 미반환
+  - 중계서버 -> Airstar API 왕복 시간 동안 커넥션 풀 점유
+  - HikariCP 기본 풀 크기 10개 기준, 동시 요청 10건이면 커넥션 풀 고갈
+  - 다른 DB 작업(조회, 다른 저장)까지 블로킹되는 연쇄 장애 가능
+
+[랩 코드 - saveAndSync()]
+
+  // 트랜잭션 없음 -- 오케스트레이터 역할만 수행
+  public void saveAndSync(BrandSaveRequest request) {
+      List<SavedBrand> savedBrands = saveBrands(request);   // TX#1: DB 저장 후 커밋
+      if (!savedBrands.isEmpty()) {
+          syncToExternal(savedBrands);                       // TX 없음 + TX#2,#3
+      }
+  }
+
+  +--------------------+----------------+-------------------------------------+
+  | 메서드             | @Transactional | 역할                                |
+  +--------------------+----------------+-------------------------------------+
+  | saveBrands()       | O (TX#1)       | DB INSERT/UPDATE + PENDING 설정     |
+  | syncToExternal()   | X              | 외부 API 호출 (커넥션 점유 없음)    |
+  | saveHistory()      | O (TX#2)       | brand_sync_history INSERT           |
+  | completeHistory()  | O (TX#3)       | 이력 SUCCESS/FAILED 업데이트        |
+  | updateSyncResults()| O (TX#4)       | brand.sync_status 일괄 업데이트     |
+  +--------------------+----------------+-------------------------------------+
+
+[개선된 DB 커넥션 점유 타임라인]
+
+  시간축 --->
+
+  [요청 시작]                                                    [요청 종료]
+      |                                                            |
+      |-- TX#1: DB 저장 --|                                        |
+      |   커넥션 획득      |                                        |
+      |   -> INSERT/UPDATE |                                        |
+      |   -> 커밋          |                                        |
+      |   -> 커넥션 반환   |                                        |
+      |                    |-- 외부 API 호출 (커넥션 없음) --|      |
+      |                    |   (수 초 대기 가능)             |      |
+      |                    |                                 |      |
+      |                    |                          TX#2~4: 결과  |
+      |                    |                          저장 후 반환  |
+
+  - 외부 API 호출이 5초 걸린다고 가정:
+    - 실무: 요청당 ~5.01초간 커넥션 점유
+    - 랩:   DB 작업 시간(수십ms)만 점유
+  - 동시 요청 10건 기준 실무는 커넥션 풀 고갈, 랩은 문제없음
+
+
+3. 외부 API 연동 방식 비교
+================================================================================
+
+[실무: BO -> 중계서버 -> Airstar 플랫폼 (3-hop)]
+
+  AirstarBrandService
+        |
+        v
+  MiddlewareApiManager.sendRequest()
+        |  RestTemplate.exchange()로 중계서버 호출
+        v
+  중계서버 (middlewareBaseUrl)
+        |  destination_url + destination_path로 실제 API 중계
+        v
+  Airstar 플랫폼 API
+
+  - DB에서 ifId(CP203/CP204/CP205/CP206)로 URL/method 동적 조회
+  - 중계서버 인증 헤더 (INTERFACE_ID, INTERFACE_AUTH_KEY 등) 필요
+  - 응답: MiddlewareResDto로 래핑
+
+[랩: Service -> shop-api 직접 호출 (2-hop)]
+
+  BrandService.syncToExternal()
+        |
+        v
+  BrandSyncClient.registerBrands()
+        |  RestClient.post().uri("/brands/register-batch")
+        v
+  shop-api (localhost:3000)
+
+  - Spring 6 RestClient 사용
+  - 코드에 URI 하드코딩 (중계서버/DB 조회 불필요)
+  - 등록/수정 구분 없이 단일 엔드포인트
+
+  +-----------------------+-------------------------------------------+---------------------------+
+  | 관점                  | 실무                                      | 랩                        |
+  +-----------------------+-------------------------------------------+---------------------------+
+  | 호출 경로             | BO -> 중계서버 -> Airstar (3-hop)         | Service -> shop-api 직접  |
+  | HTTP 클라이언트       | RestTemplate (레거시)                     | RestClient (Spring 6)     |
+  | 엔드포인트 결정       | DB에서 ifId로 동적 조회                   | 코드에 URI 고정           |
+  | 등록/수정 분리        | CP204(등록), CP206(수정) 별도 호출        | 단일 /register-batch      |
+  | 인증                  | 중계서버 헤더 (INTERFACE_AUTH_KEY 등)      | 없음 (개발 환경)          |
+  | 응답 래핑             | MiddlewareResDto<T> + AirstarResCodeEnum  | 단순 String               |
+  +-----------------------+-------------------------------------------+---------------------------+
+
+
+4. 에러 처리 & 이력 관리 비교
+================================================================================
+
+[실무 - 에러 처리 부재]
+
+  // savePartenrBrands() 내부:
+  ResponseEntity<MiddlewareResDto<Map<String, Object>>> regRes =
+      middlewareApiManager.sendRequest(regReqDto, ...);
+  log.info("플랫폼 등록 결과 : {}", regRes.toString());
+  // <-- 응답 결과에 대한 처리 없음. 로그만 출력.
+
+  문제점:
+  - API가 에러 응답(0400 등)을 반환해도 예외 미발생 시 DB 저장은 커밋됨
+    -> DB와 플랫폼 간 데이터 불일치 발생 가능
+  - RuntimeException 발생 시 @Transactional로 인해 DB 저장까지 전체 롤백
+    -> 이미 외부 API에 등록된 데이터는 롤백 불가
+  - 실패 이력이 기록되지 않아 재시도/추적 방법 없음
+
+[랩 - 전용 이력 테이블 + 상태 관리]
+
+  brand_sync_history 테이블:
+  +--------------------+--------------------------------------------+
+  | 컬럼               | 설명                                       |
+  +--------------------+--------------------------------------------+
+  | id                 | PK                                         |
+  | brand_id           | brand 테이블 FK                            |
+  | brand_code         | 브랜드 코드                                |
+  | sync_type          | REGISTER / UPDATE / DELETE                 |
+  | sync_status        | PENDING -> SUCCESS 또는 FAILED             |
+  | request_payload    | 외부 API에 보낸 JSON 원본                  |
+  | response_payload   | 외부 API 응답 원본                         |
+  | error_message      | 실패 시 에러 메시지                        |
+  | retry_count        | 재시도 횟수                                |
+  | created_at         | 요청 시각                                  |
+  | completed_at       | 완료 시각                                  |
+  +--------------------+--------------------------------------------+
+
+  에러 처리 흐름:
+  try {
+      String response = brandSyncClient.registerBrands(syncList);
+      // 성공: 이력 SUCCESS + brand.syncStatus = SUCCESS
+      for (BrandSyncHistory history : histories)
+          completeHistory(history.getId(), "SUCCESS", response, null);
+      updateSyncResults(brandIds, "SUCCESS", null);
+  } catch (Exception e) {
+      // 실패: 이력 FAILED + brand.syncStatus = FAILED + 에러메시지 기록
+      for (BrandSyncHistory history : histories)
+          completeHistory(history.getId(), "FAILED", null, e.getMessage());
+      updateSyncResults(brandIds, "FAILED", e.getMessage());
+  }
+
+  brand 테이블 동기화 상태 필드:
+  - sync_status      : NONE / PENDING / SUCCESS / FAILED
+  - sync_retry_count : 재시도 횟수
+  - last_sync_at     : 마지막 동기화 시각
+  - last_sync_error  : 마지막 에러 메시지
+
+  -> 실패 건 조회 API (GET /sync-status/FAILED) 로 재시도 기반 마련
+
+
+5. 동시성/트랜잭션 패턴 비교
+================================================================================
+
+[실무 - 단일 @Transactional, 동시성 제어 없음]
+
+  @Transactional
+  public void savePartenrBrands(...) {
+      // DB 저장 + 외부 API 호출 전체가 하나의 트랜잭션
+  }
+
+  - ApplicationEventPublisher가 @Autowired로 주입되어 있으나 실제로 미사용
+    (주석: "Transaction과 API 요청을 분리하기 위해 사용" -> 실제 구현 안 됨)
+  - 낙관적 락 없음 -- UPDATE 시 version 체크 없이 무조건 덮어씀
+  - 비관적 락 없음
+
+[랩 - 분리 트랜잭션 + 낙관적 락 + 비관적 락]
+
+  트랜잭션 분리:
+  saveAndSync()         -- 트랜잭션 없음 (오케스트레이터)
+    -> saveBrands()     -- TX#1 (DB 저장 후 즉시 커밋)
+    -> syncToExternal() -- TX 없음 (외부 API 호출)
+      -> saveHistory()       -- TX#2
+      -> completeHistory()   -- TX#3
+      -> updateSyncResults() -- TX#4
+
+  낙관적 락 (Optimistic Locking):
+  -- BrandMapper.xml:
+  UPDATE brand
+  SET ..., version = version + 1
+  WHERE id = #{id} AND version = #{version}   <-- 버전 체크
+
+  -- BrandService:
+  int updated = brandMapper.updateWithVersion(brand);
+  if (updated == 0)
+      throw new CustomException(ErrorCode.BRAND_VERSION_CONFLICT);
+
+  비관적 락 (Pessimistic Locking):
+  -- BrandMapper.xml:
+  SELECT ... FROM brand WHERE id = #{id} FOR UPDATE
+
+  +-----------------------+---------------------------------------+----------------------------------+
+  | 관점                  | 실무                                  | 랩                               |
+  +-----------------------+---------------------------------------+----------------------------------+
+  | 트랜잭션 범위         | 메서드 전체 1개                       | 단계별 4개 분리                  |
+  | 낙관적 락             | 없음                                  | version 컬럼 + WHERE version =   |
+  | 비관적 락             | 없음                                  | SELECT ... FOR UPDATE            |
+  | 상태 머신             | 없음                                  | NONE->PENDING->SUCCESS/FAILED    |
+  | 이벤트 분리           | 선언만 됨 (미사용)                    | 메서드 레벨 @Transactional 분리  |
+  +-----------------------+---------------------------------------+----------------------------------+
+
+
+6. 핵심 차이 요약
+================================================================================
+
+  +----+------------------------+---------------------------------------+------------------------------------+
+  | #  | 비교 항목              | 실무 (Production)                     | 랩 (concurrency-lab)               |
+  +----+------------------------+---------------------------------------+------------------------------------+
+  |  1 | 트랜잭션 범위          | @Transactional 1개가 전체를 감쌈      | 단계별 분리 (TX#1~#4)             |
+  |  2 | DB 커넥션 점유         | 외부 API 응답까지 점유 (수초~수십초)  | DB 작업 시간만 점유 (수십ms)       |
+  |  3 | 외부 API 호출 방식     | 중계서버 경유 (3-hop)                 | 직접 호출 (2-hop)                  |
+  |  4 | HTTP 클라이언트        | RestTemplate (레거시)                 | RestClient (Spring 6)              |
+  |  5 | 인터페이스 라우팅      | DB에서 ifId로 동적 조회               | 코드에 URI 고정                    |
+  |  6 | 등록/수정 API 분리     | CP204(등록), CP206(수정) 별도         | 단일 /register-batch               |
+  |  7 | 에러 처리              | API 응답 코드 미확인, 로그만 출력     | try-catch + SUCCESS/FAILED 분기    |
+  |  8 | 동기화 이력            | 없음 (추적 불가)                      | brand_sync_history 테이블          |
+  |  9 | 동기화 상태 관리       | 없음                                  | syncStatus (NONE/PENDING/...)      |
+  | 10 | 재시도 기반            | 없음                                  | retry_count + 상태별 조회 API      |
+  | 11 | 낙관적 락              | 없음                                  | version 컬럼 + updateWithVersion   |
+  | 12 | 비관적 락              | 없음                                  | SELECT ... FOR UPDATE              |
+  | 13 | DI 방식                | @Autowired 필드 주입                  | @RequiredArgsConstructor 생성자    |
+  | 14 | 엔티티 설계            | 플랫폼/입점사 분리 (2개 테이블)       | 단일 brand + 이력 테이블           |
+  | 15 | 미구현 TODO            | EventPublisher 주입만 하고 미사용     | 메서드 레벨 @Transactional로 해결  |
+  +----+------------------------+---------------------------------------+------------------------------------+
+
+
+7. 결론
+================================================================================
+
+  랩(concurrency-lab)은 실무 코드의 savePartenrBrands()에서
+  "[TODO]"로 남겨둔 "DB 트랜잭션과 API 요청 분리" 문제를 실제로 해결한 구현체이다.
+
+  핵심 개선 3가지:
+
+  (1) 트랜잭션 경계 축소
+      - 외부 API 호출을 트랜잭션 밖으로 분리
+      - DB 커넥션 점유 시간을 최소화
+      - 동시 요청 증가 시에도 커넥션 풀 고갈 방지
+
+  (2) 동기화 이력 관리
+      - brand_sync_history 테이블로 모든 동기화 시도를 기록
+      - 요청/응답 payload, 에러 메시지, 재시도 횟수까지 추적
+      - 실패 건 식별 및 재시도 기반 마련
+
+  (3) 동시성 제어
+      - 낙관적 락 (version 컬럼)으로 동시 수정 충돌 감지
+      - 비관적 락 (SELECT FOR UPDATE)으로 필요 시 행 잠금
+      - 상태 머신 (syncStatus)으로 동기화 진행 상태 관리
+
+  실무 코드의 구조(중계서버, 인터페이스 ID 기반 라우팅 등)는
+  기업 인프라 요구사항에 맞춘 것이지만,
+  트랜잭션/동시성 관점에서는 랩이 명확하게 개선된 패턴이다.
+
+================================================================================

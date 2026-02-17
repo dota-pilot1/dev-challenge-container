@@ -1,0 +1,81 @@
+===============================================================================
+  트랜잭션 관련 문제 파일 목록 및 각 파일의 문제점
+===============================================================================
+
+호출 흐름:
+  Controller -> Service(@Transactional) -> Mapper(DB) + MiddlewareApiManager(외부API)
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  이 전체가 하나의 트랜잭션 안에서 실행됨 = DB 커넥션 장시간 점유
+
+
+1. AirstarBrandService.java  [핵심 문제 파일]
+--------------------------------------------------------------------------------
+   문제: savePartenrBrands() 메서드에 @Transactional이 걸려 있는데,
+         그 안에서 DB INSERT/UPDATE + 외부 API 호출을 모두 수행함.
+         외부 API 응답 대기(수초~수십초) 동안 DB 커넥션이 반환되지 않음.
+
+   위치: savePartenrBrands() 메서드
+   증거: 코드 내 주석 "//db 트랜젝션과 api 요청 분리필요[TODO]"
+   추가: ApplicationEventPublisher를 주입해뒀지만 실제 사용하지 않음
+         (트랜잭션 분리 의도는 있었으나 미구현)
+
+
+2. MiddlewareApiManager.java  [트랜잭션 내 외부 호출]
+--------------------------------------------------------------------------------
+   문제: sendRequest()가 RestTemplate.exchange()로 중계서버를 호출함.
+         이 메서드가 @Transactional 안에서 호출되므로,
+         중계서버 -> Airstar API 왕복 시간 동안 DB 커넥션 점유.
+
+   위치: sendRequest() 메서드
+   영향: 네트워크 지연/타임아웃 발생 시 커넥션 풀 고갈 위험 증가
+
+
+3. AirstarBrandMapper.java + AirstarBrandMapper.xml  [트랜잭션 내 DB 작업]
+--------------------------------------------------------------------------------
+   문제: insertPartnerBrand(), updatePartnerBrand()가
+         외부 API 호출과 같은 트랜잭션에서 실행됨.
+         외부 API 실패 시 DB 저장까지 롤백되거나,
+         반대로 API가 에러 응답을 줘도 DB는 커밋되는 불일치 발생 가능.
+
+   위치: insertPartnerBrand, updatePartnerBrand
+
+
+4. AirstarInterfaceInfoMapper.java + AirstarInterfaceInfoMapper.xml
+   [트랜잭션 내 추가 DB 조회]
+--------------------------------------------------------------------------------
+   문제: getInterfaceInfo()로 인터페이스 정보를 DB에서 조회하는데,
+         이것도 같은 트랜잭션 안에서 실행됨.
+         본래 트랜잭션과 무관한 읽기 전용 조회인데 불필요하게 포함됨.
+
+   위치: getMiddlewareInterfaceInfo
+
+
+5. AirstarBrandController.java  [진입점]
+--------------------------------------------------------------------------------
+   문제 자체는 없으나, savePartenrBrands()를 호출하는 진입점.
+   트랜잭션 범위를 이해하기 위해 포함.
+
+   위치: savePartnerBrands() 엔드포인트
+
+
+================================================================================
+  문제 요약 다이어그램
+================================================================================
+
+  @Transactional 시작 (커넥션 획득)
+      |
+      |-- [DB] insertPartnerBrand / updatePartnerBrand  (수 ms)
+      |
+      |-- [DB] getInterfaceInfo("CP204")                (수 ms, 불필요한 트랜잭션 포함)
+      |-- [네트워크] sendRequest -> 중계서버 -> Airstar  (수 초 ~ 수십 초)
+      |                                                  ^^^ 커넥션 점유 ^^^
+      |
+      |-- [DB] getInterfaceInfo("CP206")                (수 ms)
+      |-- [네트워크] sendRequest -> 중계서버 -> Airstar  (수 초 ~ 수십 초)
+      |                                                  ^^^ 커넥션 점유 ^^^
+      |
+  @Transactional 종료 (커넥션 반환)
+
+  -> 총 커넥션 점유 시간: DB 작업(수십ms) + 외부 API 2회(수초~수십초)
+  -> HikariCP 풀 10개 기준, 동시 요청 10건이면 커넥션 고갈
+================================================================================

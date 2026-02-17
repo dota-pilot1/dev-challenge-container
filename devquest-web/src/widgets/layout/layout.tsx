@@ -28,6 +28,7 @@ const navItems = [
 const brandSubItems = [
   { to: "/brands", label: "메인 서버" },
   { to: "/brands-external", label: "외부 서버" },
+  { to: "/brand-sync-history", label: "동기화 이력" },
 ] as const;
 
 export function Layout({ children }: { children: React.ReactNode }) {

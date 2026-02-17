@@ -2,6 +2,8 @@ package com.opro.concurrency.controller;
 
 import com.opro.concurrency.dto.BrandSaveRequest;
 import com.opro.concurrency.entity.Brand;
+import com.opro.concurrency.entity.BrandSyncHistory;
+import com.opro.concurrency.mapper.BrandSyncHistoryMapper;
 import com.opro.concurrency.service.BrandService;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 public class BrandController {
 
     private final BrandService brandService;
+    private final BrandSyncHistoryMapper brandSyncHistoryMapper;
 
     @GetMapping
     public ResponseEntity<List<Brand>> findAll() {
@@ -31,6 +34,11 @@ public class BrandController {
         @PathVariable String status
     ) {
         return ResponseEntity.ok(brandService.findBySyncStatus(status));
+    }
+
+    @GetMapping("/sync-history")
+    public ResponseEntity<List<BrandSyncHistory>> findSyncHistory() {
+        return ResponseEntity.ok(brandSyncHistoryMapper.findAll());
     }
 
     @DeleteMapping("/all")

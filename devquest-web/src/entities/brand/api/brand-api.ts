@@ -1,5 +1,10 @@
 import { mainApi, paymentApi } from "@/shared/api/client";
-import type { Brand, PlatformBrand, BrandSaveRequest } from "../model";
+import type {
+  Brand,
+  PlatformBrand,
+  BrandSaveRequest,
+  BrandSyncHistory,
+} from "../model";
 
 export const brandsApi = {
   findAll: () => mainApi.get<Brand[]>("/brands"),
@@ -11,6 +16,8 @@ export const brandsApi = {
   save: (data: BrandSaveRequest) => mainApi.post<void>("/brands/save", data),
   saveAndSync: (data: BrandSaveRequest) =>
     mainApi.post<void>("/brands/save-and-sync", data),
+  findSyncHistory: () =>
+    mainApi.get<BrandSyncHistory[]>("/brands/sync-history"),
 };
 
 export const platformBrandsApi = {

@@ -44,3 +44,17 @@ export interface BrandRow {
 export interface BrandSaveRequest {
   rows: BrandRow[];
 }
+
+export interface BrandSyncHistory {
+  id: number;
+  brandId: number;
+  brandCode: string;
+  syncType: string;
+  syncStatus: string;
+  requestPayload: string | null;
+  responsePayload: string | null;
+  errorMessage: string | null;
+  retryCount: number;
+  createdAt: string;
+  completedAt: string | null;
+}

@@ -1,0 +1,149 @@
+1. 가장 큰 문제는 한 트랜잭션안에서 외부 api 요청까지 날려서 두가지 요청을 모두 처리 한다는점이다.
+============================================================================
+
+	@Transactional
+	public void savePartenrBrands(List<PartnerBrandReqDto> partnerBrandReqList) throws Exception {
+
+		//플랫폼 API 요청에 전달 할 데이터
+		List<PartnerBrandApiRegReqDto> regList = new ArrayList<>();//등록API 전달 리스트
+		List<PartnerBrandApiRegReqDto> upList = new ArrayList<>();//수정API 전달 리스트
+
+		//DB 저장
+		for (PartnerBrandReqDto partnerBrand : partnerBrandReqList) {
+
+			//등록/수정 구분 C, U
+			String status = partnerBrand.getStatus();
+
+		    // status에 따라 INSERT 또는 UPDATE 결정
+		    if ("C".equals(status)) {
+		    	airstarBrandMapper.insertPartnerBrand(partnerBrand);
+
+		    	PartnerBrandApiRegReqDto regDto = new PartnerBrandApiRegReqDto();
+		    	regDto.setBrandCode(partnerBrand.getBrandCode());
+		    	regDto.setBrandMid(partnerBrand.getSteId());//사이트ID를 인천공사 brandMid로 사용
+		    	regDto.setUseYn(partnerBrand.getUseYn());
+
+		    	regList.add(regDto);
+
+		    } else if ("U".equals(status)) {
+		    	airstarBrandMapper.updatePartnerBrand(partnerBrand);
+
+		    	PartnerBrandApiRegReqDto upDto = new PartnerBrandApiRegReqDto();
+		    	upDto.setBrandCode(partnerBrand.getBrandCode());
+		    	upDto.setBrandMid(partnerBrand.getSteId());//사이트ID를 인천공사 brandMid로 사용
+		    	upDto.setUseYn(partnerBrand.getUseYn());
+
+		    	upList.add(upDto);
+		    }
+		}//for
+
+		log.info("입점사 파트너 브랜드 등록 건수 : {}", regList.size());
+		log.info("입점사 파트너 브랜드 수정 건수 : {}", upList.size());
+
+		//플랫폼 등록/수정 플랫폼 API요청
+		if (!regList.isEmpty()) {
+
+			String ifId = "CP204";//입점사 공항공사 브랜드 등록
+
+			Map<String, Object> regReqData = new HashMap<>();
+			regReqData.put("brands", regList);
+
+			MiddlewareReqDto<Map<String, Object>> regReqDto = middlewareApiManager.getInterfaceInfo(ifId);
+			regReqDto.setBody(regReqData);
+
+			ResponseEntity<MiddlewareResDto<Map<String, Object>>> regRes = middlewareApiManager.sendRequest(regReqDto, new ParameterizedTypeReference<MiddlewareResDto<Map<String, Object>>>() {});
+
+			log.info("플랫폼 등록 결과 : {}", regRes.toString());
+		}
+
+		if (!upList.isEmpty()) {
+
+			String ifId = "CP206";//입점사 공항공사 브랜드 등록
+
+			Map<String, Object> upReqData = new HashMap<>();
+			upReqData.put("brands", upList);
+
+			MiddlewareReqDto<Map<String, Object>> upReqDto = middlewareApiManager.getInterfaceInfo(ifId);
+			upReqDto.setBody(upReqData);
+
+			ResponseEntity<MiddlewareResDto<Map<String, Object>>> upRes = middlewareApiManager.sendRequest(upReqDto, new ParameterizedTypeReference<MiddlewareResDto<Map<String, Object>>>() {});
+
+			log.info("플랫폼 등록 결과 : {}", upRes.toString());
+		}
+	}
+
+============================================================================
+
+
+2. 특히 문제가 되는 부분은 아래의 외부 api 요청을 날리는 부분에서 실패가 발생하면 메인 서버 디비와 달리 트랜잭션 관리의 범위에서 벗어나게 된다는 점이다
+============================================================================
+		//플랫폼 등록/수정 플랫폼 API요청
+		if (!regList.isEmpty()) {
+
+			String ifId = "CP204";//입점사 공항공사 브랜드 등록
+
+			Map<String, Object> regReqData = new HashMap<>();
+			regReqData.put("brands", regList);
+
+			MiddlewareReqDto<Map<String, Object>> regReqDto = middlewareApiManager.getInterfaceInfo(ifId);
+			regReqDto.setBody(regReqData);
+
+			ResponseEntity<MiddlewareResDto<Map<String, Object>>> regRes = middlewareApiManager.sendRequest(regReqDto, new ParameterizedTypeReference<MiddlewareResDto<Map<String, Object>>>() {});
+
+			log.info("플랫폼 등록 결과 : {}", regRes.toString());
+		}
+
+		if (!upList.isEmpty()) {
+
+			String ifId = "CP206";//입점사 공항공사 브랜드 등록
+
+			Map<String, Object> upReqData = new HashMap<>();
+			upReqData.put("brands", upList);
+
+			MiddlewareReqDto<Map<String, Object>> upReqDto = middlewareApiManager.getInterfaceInfo(ifId);
+			upReqDto.setBody(upReqData);
+
+			ResponseEntity<MiddlewareResDto<Map<String, Object>>> upRes = middlewareApiManager.sendRequest(upReqDto, new ParameterizedTypeReference<MiddlewareResDto<Map<String, Object>>>() {});
+
+			log.info("플랫폼 등록 결과 : {}", upRes.toString());
+		}
+============================================================================
+
+
+해결책:
+============================================================================
+중계서버는 결국 `sendRequest()`의 내부 구현 디테일일 뿐이고, 트랜잭션 경계 설정과는 무관합니다. 직접 호출이든 중계서버 경유든, **`@Transactional` 밖에서 호출하면 DB 커넥션을 점유하지 않는다**는 원리는 동일합니다.
+
+정리하면 실무에 적용할 것은 딱 2가지:
+
+1. **트랜잭션 분리** — DB 저장(`INSERT/UPDATE`)만 `@Transactional`로 감싸고, `sendRequest(CP204/CP206)`은 밖으로 빼기
+2. **이력 관리 테이블 추가** — 랩의 `brand_sync_history`처럼, 외부 API 호출 전 PENDING 기록 -> 결과에 따라 SUCCESS/FAILED 업데이트
+============================================================================
+
+
+해결책 예시:
+============================================================================
+ex)
+// 오케스트레이터 (트랜잭션 없음)
+public void savePartenrBrands(List<PartnerBrandReqDto> list) throws Exception {
+
+    // TX#1: DB 저장만 (커밋 → 커넥션 반환)
+    SyncData data = saveBrandsToDb(list);
+
+    // TX 밖: 외부 API 호출 (커넥션 점유 없음)
+    syncToExternal(data.regList, data.upList);
+
+    // TX#2: 결과 업데이트
+    updateSyncResults(...);
+}
+
+@Transactional
+public SyncData saveBrandsToDb(List<PartnerBrandReqDto> list) {
+    // INSERT/UPDATE만 수행
+}
+
+// @Transactional 없음
+public void syncToExternal(List regList, List upList) {
+    // CP204, CP206 호출
+}
+============================================================================
