@@ -1,0 +1,117 @@
+===============================================================================
+  Entity vs DTO 차이점 정리
+===============================================================================
+
+
+1. 핵심 정리
+===============================================================================
+
+  Entity = DB 테이블 그 자체에 대한 객체
+  DTO    = 각각의 케이스에 맞는 특화된 객체 (필요한 필드만 골라 담는 그릇)
+
+
+2. Entity (엔티티)
+===============================================================================
+
+  - DB 테이블과 1:1 매핑되는 클래스
+  - 테이블의 모든 컬럼을 필드로 가짐
+  - INSERT/SELECT/UPDATE 할 때 사용
+  - entity/ 패키지에 위치
+
+  예시) Member 엔티티 = member 테이블의 행(row) 하나
+
+      @Data
+      public class Member {
+          private Long id;                    // DB 컬럼
+          private String email;               // DB 컬럼
+          private String password;            // DB 컬럼
+          private String nickname;            // DB 컬럼
+          private String role;                // DB 컬럼
+          private LocalDateTime createdAt;    // DB 컬럼
+      }
+
+
+3. DTO (Data Transfer Object)
+===============================================================================
+
+  - 데이터를 주고받기 위한 "포장" 클래스
+  - 상황에 맞게 필요한 필드만 담음
+  - 요청(Request) / 응답(Response) / 외부 API 전송 등 용도별로 만듦
+  - dto/ 패키지에 위치
+
+  예시)
+
+      // 회원가입 요청 (password는 있지만 id, role, createdAt은 없음)
+      public record SignupRequest(String email, String password, String nickname) {}
+
+      // 로그인 응답 (password는 빠지고 token이 추가됨)
+      public record AuthResponse(String token, String email, String nickname) {}
+
+
+4. 데이터 흐름으로 보기
+===============================================================================
+
+  [프론트] --SignupRequest(email, password, nickname)--> [컨트롤러]
+                                                            |
+                                                      Member 엔티티로 변환
+                                                            |
+                                                      DB INSERT (Member)
+                                                            |
+                                                      AuthResponse로 변환
+                                                            |
+  [프론트] <--AuthResponse(token, email, nickname)--- [컨트롤러]
+
+
+5. 브랜드 예시 -- 같은 테이블, 상황마다 다른 DTO
+===============================================================================
+
+  Brand (엔티티) = 테이블 컬럼 전부
+      id, brandCode, shopId, steId, brandNameKo, brandNameEn,
+      brandDesc, useYn, syncStatus, syncRetryCount,
+      lastSyncAt, lastSyncError, version, createdAt, updatedAt
+
+  BrandSaveRequest (DTO) = 저장할 때 필요한 것만
+      brandCode, shopId, steId, brandNameKo, brandNameEn,
+      brandDesc, useYn, status
+
+  BrandSyncData (DTO) = 외부 API에 보낼 때 필요한 것만
+      brandCode, shopId, brandNameKo, brandNameEn,
+      brandDesc, useYn
+
+
+6. 비교 표
+===============================================================================
+
+  +----------+----------------------------+-------------------------------+
+  | 구분     | Entity                     | DTO                           |
+  +----------+----------------------------+-------------------------------+
+  | 목적     | DB 테이블 매핑             | 요청/응답 데이터 전달         |
+  | 필드     | DB 컬럼 전체               | 필요한 것만                   |
+  | 개수     | 테이블당 1개               | 상황마다 여러 개              |
+  | 위치     | entity/                    | dto/                          |
+  +----------+----------------------------+-------------------------------+
+
+  예시)
+  +----------+----------------------------+-------------------------------+
+  | Entity   | Member                     | Brand                         |
+  |          | (id, email, password,      | (id, brandCode, syncStatus,   |
+  |          |  role, createdAt)          |  version, createdAt, ...)     |
+  +----------+----------------------------+-------------------------------+
+  | DTO      | SignupRequest              | BrandSaveRequest              |
+  |          | (email, password, nickname)| (brandCode, brandNameKo, ...) |
+  |          |                            |                               |
+  |          | AuthResponse               | BrandSyncData                 |
+  |          | (token, email, nickname)   | (brandCode, brandNameKo, ...) |
+  +----------+----------------------------+-------------------------------+
+
+
+7. DTO를 쓰는 핵심 이유
+===============================================================================
+
+  보안과 관심사 분리.
+
+  - Member 엔티티를 그대로 응답에 넣으면 password가 프론트로 노출됨
+  - DTO로 필요한 필드만 골라서 보내면 안전함
+  - 각 상황(저장, 조회, 외부 전송)에 맞는 필드만 담아서 명확함
+
+===============================================================================
